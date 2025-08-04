@@ -5,9 +5,6 @@
 
 一个基于 Gradio 的图形化 Web 界面，旨在极大简化使用 [Unsloth](https://github.com/unslothai/unsloth) 库进行大语言模型（LLM）的微调过程。通过本工具，您可以轻松配置、启动、监控和管理您的模型微调实验，无需编写一行代码。
 
-![Application Screenshot](https://raw.githubusercontent.com/your-username/your-repo-name/main/assets/screenshot.png)
-> **注意**: 请将上面的图片链接替换为您自己的应用截图。建议创建一个 `assets` 目录存放图片。
-
 ---
 
 ## ✨ 核心功能
