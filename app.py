@@ -330,8 +330,8 @@ with gr.Blocks(theme=gr.themes.Soft(), css="footer {display: none !important}") 
             tensorboard_html = f'<iframe src="http://127.0.0.1:6006" width="100%" height="800px" frameborder="0"></iframe>'
             tensorboard_view = gr.HTML(tensorboard_html)
 
-    gr.Markdown("--- \n ## 📋 训练日志与状态")
-    status_output = gr.Textbox(label="Status", interactive=False, lines=3, max_lines=5)
+            gr.Markdown("--- \n ## 📋 训练日志与状态")
+            status_output = gr.Textbox(label="Status", interactive=False, lines=3, max_lines=5)
 
     training_mode_selector.change(
         fn=update_training_mode_ui,
