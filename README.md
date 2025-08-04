@@ -35,10 +35,9 @@
 
 1.  **克隆仓库**
     ```bash
-    git clone https://github.com/your-username/your-repo-name.git
+    git clone https://github.com/aifeifei798/unsloth-gui.git
     cd your-repo-name
     ```
-    *(请将 `your-username/your-repo-name` 替换为您自己的 GitHub 路径)*
 
 2.  **创建并激活虚拟环境** (推荐)
     ```bash
