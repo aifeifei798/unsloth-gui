@@ -1,0 +1,32 @@
+[
+  {
+    "display_name": "Mistral 7B Instruct v0.2 (4-bit)",
+    "model_id": "unsloth/mistral-7b-instruct-v0.2-bnb-4bit",
+    "load_in_4bit": true,
+    "dtype": null
+  },
+  {
+    "display_name": "Llama-3 8B Instruct (4-bit)",
+    "model_id": "unsloth/llama-3-8b-instruct-bnb-4bit",
+    "load_in_4bit": true,
+    "dtype": null
+  },
+  {
+    "display_name": "Phi-3 Mini 4k Instruct (bf16)",
+    "model_id": "unsloth/phi-3-mini-4k-instruct",
+    "load_in_4bit": false,
+    "dtype": "bfloat16"
+  },
+  {
+    "display_name": "CodeLlama 7b Instruct (4-bit)",
+    "model_id": "unsloth/codellama-7b-instruct-bnb-4bit",
+    "load_in_4bit": true,
+    "dtype": null
+  },
+  {
+    "display_name": "Gemma 2B Instruct (4-bit)",
+    "model_id": "unsloth/gemma-2b-it-bnb-4bit",
+    "load_in_4bit": true,
+    "dtype": null
+  }
+]
