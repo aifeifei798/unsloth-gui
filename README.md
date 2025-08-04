@@ -66,6 +66,12 @@
 ```json
 [
   {
+    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
+    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized", //本地模型
+    "load_in_4bit": true,
+    "dtype": null
+  },
+  {
     "display_name": "Mistral 7B Instruct v0.2 (4-bit)",
     "model_id": "unsloth/mistral-7b-instruct-v0.2-bnb-4bit",
     "load_in_4bit": true,
@@ -91,11 +97,36 @@
 在 `datasets_config/` 目录下，为每个您想使用的数据集创建一个 `.json` 配置文件。
 
 **示例 `datasets_config/alpaca_cleaned.json`:**
+
+**instruction:** 系统词
+
+**input:** 输入问题
+
+**output:** 答案
+
+说明: 根据数据自己来整合出数据,这个格式很多,无法统一
+
+hf数据
 ```json
 {
   "display_name": "Alpaca (Cleaned)",
   "dataset_id": "yahma/alpaca-cleaned",
   "split": "train",
+  "prompt_template": "Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}",
+  "input_columns": {
+    "instruction": "instruction",
+    "input": "input",
+    "output": "output"
+  }
+}
+```
+本地数据
+```json
+{
+  "display_name": "Chinese-DeepSeek-R1-Distill-data-110k-alpaca",
+  "dataset_id": "../Chinese-DeepSeek-R1-Distill-data-110k-alpaca",
+  "split": "train",
+  "is_local": true, //说明是本地数据
   "prompt_template": "Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}",
   "input_columns": {
     "instruction": "instruction",
