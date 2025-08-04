@@ -1,7 +1,7 @@
 [
   {
-    "display_name": "Mistral 7B Instruct v0.2 (4-bit)",
-    "model_id": "unsloth/mistral-7b-instruct-v0.2-bnb-4bit",
+    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
+    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized",
     "load_in_4bit": true,
     "dtype": null
   },
