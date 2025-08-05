@@ -7,6 +7,8 @@
 
 ![Application Screenshot](https://github.com/aifeifei798/unsloth-gui/blob/main/images/1.png)
 
+![Application Screenshot](https://github.com/aifeifei798/unsloth-gui/blob/main/images/2.png)
+
 ---
 
 ## ✨ 核心功能
