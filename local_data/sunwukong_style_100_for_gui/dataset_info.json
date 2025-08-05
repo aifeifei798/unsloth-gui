@@ -1,0 +1,42 @@
+{
+  "builder_name": "json",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "json",
+  "dataset_size": 19782,
+  "description": "",
+  "download_checksums": {
+    "/home/ubuntu/unsloth-gui/unsloth-gui/local_data/./sunwukong_style_100.jsonl": {
+      "num_bytes": 22258,
+      "checksum": null
+    }
+  },
+  "download_size": 22258,
+  "features": {
+    "instruction": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "output": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 42040,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 19782,
+      "num_examples": 94,
+      "dataset_name": "json"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
