@@ -18,14 +18,14 @@
     "dtype": "bfloat16"
   },
   {
-    "display_name": "CodeLlama 7b Instruct (4-bit)",
-    "model_id": "unsloth/codellama-7b-instruct-bnb-4bit",
+    "display_name": "Gemma-3 1B (Google 极致性能版)",
+    "model_id": "unsloth/gemma-3-1b-it-qat-unsloth-bnb-4bit",
     "load_in_4bit": true,
     "dtype": null
   },
   {
-    "display_name": "Gemma 2B Instruct (4-bit)",
-    "model_id": "unsloth/gemma-2b-it-bnb-4bit",
+    "display_name": "Gemma-3 4B (Google 极致性能版)",
+    "model_id": "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit",
     "load_in_4bit": true,
     "dtype": null
   }
