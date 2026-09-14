@@ -19,7 +19,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
-from src.config import load_models_config, save_models_config, ModelConfig
+from src.config import load_models_config, save_models_config, ModelConfig, model_source
 from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
@@ -99,30 +99,78 @@ def _model_dd_updates(cur_train, cur_inf):
     )
 
 
-def _model_add_or_update(display, source, model_id, use_4bit, dtype, seq_len, chat,
-                         cur_train, cur_inf):
+# --- 模型管理：主从编辑（点行填充表单，新建/保存/两步删除） ---
+# 两步删除的待确认名（单机本地应用，模块级变量足够）
+_del_armed: str | None = None
+_SOURCE_LABEL_REV = {"local": "本地路径", "huggingface": "HuggingFace",
+                     "modelscope": "魔搭 ModelScope"}
+
+
+def _reset_del_arm():
+    global _del_armed
+    _del_armed = None
+
+
+def _model_pick(evt: gr.SelectData):
+    """点表格某行，把该模型填进表单."""
+    _reset_del_arm()
+    empty = [gr.update(value=v) for v in ("", "HuggingFace", "", True, "自动", 2048, "")]
+    try:
+        row_idx = evt.index[0] if evt is not None and evt.index else None
+    except Exception:
+        row_idx = None
+    if row_idx is None or not (0 <= row_idx < len(MODELS)):
+        return (*empty, "❌ 请点击表格中的某一行。")
+    m = MODELS[row_idx]
+    src = model_source(m)
+    return (
+        gr.update(value=m.display_name),
+        gr.update(value=_SOURCE_LABEL_REV.get(src, "HuggingFace")),
+        gr.update(value=m.model_id),
+        gr.update(value=bool(m.load_in_4bit)),
+        gr.update(value=m.dtype or "自动"),
+        gr.update(value=m.max_seq_length),
+        gr.update(value=m.chat_template or ""),
+        f"已载入 '{m.display_name}'，改完点保存，删点两次删除。",
+    )
+
+
+def _model_new():
+    """清空表单，准备录一个新模型."""
+    _reset_del_arm()
+    return (
+        gr.update(value=""), gr.update(value="HuggingFace"), gr.update(value=""),
+        gr.update(value=True), gr.update(value="自动"), gr.update(value=2048),
+        gr.update(value=""),
+        "已清空，填完点保存即可新增（展示名已存在则覆盖更新）。",
+    )
+
+
+def _model_save(display, source, model_id, use_4bit, dtype, seq_len, chat,
+                cur_train, cur_inf):
     from src.config import find_by_name as _find
+    _reset_del_arm()
     display = (display or "").strip()
     model_id = (model_id or "").strip()
     if not display:
-        return ("❌ 展示名不能为空。",) + (gr.update(),) * 4
+        return ("❌ 展示名不能为空。",) + (gr.update(),) * 3
     if not model_id:
-        return ("❌ 模型 ID / 路径不能为空。",) + (gr.update(),) * 4
+        return ("❌ 模型 ID / 路径不能为空。",) + (gr.update(),) * 3
     if source != "本地路径" and " " in model_id:
-        return ("❌ 远端模型 ID 不能包含空格，请检查。",) + (gr.update(),) * 4
+        return ("❌ 远端模型 ID 不能包含空格，请检查。",) + (gr.update(),) * 3
     if source == "本地路径":
         p = Path(model_id)
         if not p.is_absolute():
             p = PROJECT_ROOT / p
         if not p.exists():
             return (f"❌ 本地路径不存在: {model_id}（解析为 {p}）。"
-                     f"请检查路径或换来源。",) + (gr.update(),) * 4
+                     f"请检查路径或换来源。",) + (gr.update(),) * 3
     try:
         seq = int(seq_len)
     except (TypeError, ValueError):
-        return ("❌ 上下文长度必须是数字。",) + (gr.update(),) * 4
+        return ("❌ 上下文长度必须是数字。",) + (gr.update(),) * 3
     if seq < 256:
-        return ("❌ 上下文长度至少 256。",) + (gr.update(),) * 4
+        return ("❌ 上下文长度至少 256。",) + (gr.update(),) * 3
     existed = _find(MODELS, display) is not None
     cfg = ModelConfig(
         display_name=display, model_id=model_id, load_in_4bit=bool(use_4bit),
@@ -134,7 +182,7 @@ def _model_add_or_update(display, source, model_id, use_4bit, dtype, seq_len, ch
     try:
         save_models_config(MODELS)
     except Exception as e:
-        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 4
+        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 3
     warns = _reload_models()
     action = "已更新" if existed else "已添加"
     msg = f"✅ {action}模型 '{display}'（{source}）。"
@@ -143,38 +191,41 @@ def _model_add_or_update(display, source, model_id, use_4bit, dtype, seq_len, ch
     if warns:
         msg += f"\n⚠️ {warns}"
     dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
-    return (msg, gr.update(value=_model_rows()),
-            gr.update(choices=MODEL_DISPLAY_NAMES,
-                      value=display if display in MODEL_DISPLAY_NAMES else None),
-            dd_train, dd_inf)
+    return (msg, gr.update(value=_model_rows()), dd_train, dd_inf)
 
 
-def _model_delete(name, cur_train, cur_inf):
+def _model_delete_step(name, cur_train, cur_inf):
+    """两步删除：目标就是表单里的展示名。第一次点进入待确认，第二次执行；
+    期间点其他按钮自动取消。"""
+    global _del_armed
+    name = (name or "").strip()
     if not name:
-        return ("❌ 请先选择要删除的模型。",) + (gr.update(),) * 4
+        return ("❌ 表单展示名是空的：先点表格某一行，再删。",) + (gr.update(),) * 3
     if len(MODELS) <= 1:
-        return ("❌ 至少保留一个模型，不能全删。",) + (gr.update(),) * 4
+        return ("❌ 至少保留一个模型，不能全删。",) + (gr.update(),) * 3
+    if _del_armed != name:
+        _del_armed = name
+        return (f"⚠️ 再点一次「删除」确认删除 '{name}'。点其他按钮自动取消。",
+                ) + (gr.update(),) * 3
+    _del_armed = None
     MODELS[:] = [c for c in MODELS if c.display_name != name]
     try:
         save_models_config(MODELS)
     except Exception as e:
-        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 4
+        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 3
     warns = _reload_models()
     msg = f"🗑 已删除模型 '{name}'。" + (f"\n⚠️ {warns}" if warns else "")
     dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
-    return (msg, gr.update(value=_model_rows()),
-            gr.update(choices=MODEL_DISPLAY_NAMES,
-                      value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None),
-            dd_train, dd_inf)
+    return (msg, gr.update(value=_model_rows()), dd_train, dd_inf)
 
 
 def _models_refresh(cur_train, cur_inf):
+    _reset_del_arm()
     warns = _reload_models()
     msg = (f"已刷新：共 {len(MODEL_DISPLAY_NAMES)} 个模型。"
            + (f"\n⚠️ {warns}" if warns else ""))
     dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
-    return (msg, gr.update(value=_model_rows()),
-            gr.update(choices=MODEL_DISPLAY_NAMES), dd_train, dd_inf)
+    return (msg, gr.update(value=_model_rows()), dd_train, dd_inf)
 
 # --- 纯视觉主题（不影响任何功能逻辑） ---
 APP_THEME = gr.themes.Soft(
@@ -206,7 +257,7 @@ button.lg.primary {font-weight: 600}
 HERO_HTML = """
 <div id="app-hero">
   <h1>🚀 Unsloth GUI Trainer & Playground</h1>
-  <p>轻量 · 单卡 · 专属 SFT 微调工作台 — 配置、训练、监控、对话，一页完成</p>
+  <p>模型管理、数据处理、训练、监控、对话，一页完成</p>
   <span class="ver">v4.0 · Gradio 6 · Unsloth Core</span>
 </div>
 """
@@ -308,6 +359,9 @@ def _prep_source_ui(kind):
         gr.update(visible=is_hf),
         gr.update(visible=is_hf),
         gr.update(visible=is_ex),
+        # 换来源后之前的检查结果作废，强制重读
+        gr.update(interactive=False),
+        gr.update(interactive=False),
     )
 
 
@@ -315,13 +369,14 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
                   progress=gr.Progress(track_tqdm=True)):
     from src.config import find_by_name as _find
     _empty = (gr.update(), gr.update(), gr.update(), gr.update())
+    _locked = (gr.update(interactive=False), gr.update(interactive=False))
     if kind == "上传文件":
         if not upload_path:
-            return "❌ 请先上传文件。", {}, *_empty
+            return "❌ 请先上传文件。", {}, *_empty, *_locked
         try:
             local_path = persist_upload(upload_path)
         except Exception as e:
-            return f"❌ 上传文件保存失败: {e}", {}, *_empty
+            return f"❌ 上传文件保存失败: {e}", {}, *_empty, *_locked
         dkind, existing = "upload", None
     elif kind == "HuggingFace":
         dkind, local_path, existing = "hf", "", None
@@ -329,11 +384,11 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
         dkind, local_path = "existing", ""
         existing = _find(DATASETS, existing_name)
         if existing is None:
-            return f"❌ 找不到配置 '{existing_name}'。", {}, *_empty
+            return f"❌ 找不到配置 '{existing_name}'。", {}, *_empty, *_locked
     try:
         text, state = inspect_text(dkind, hf_id or "", hf_split or "train", local_path, existing)
     except Exception as e:
-        return f"❌ 读取失败: {e}", {}, *_empty
+        return f"❌ 读取失败: {e}", {}, *_empty, *_locked
     cols = state["columns"]
     return (
         text, state,
@@ -341,6 +396,9 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
         gr.update(choices=cols, value=[]),
         gr.update(choices=cols, value=[]),
         gr.update(choices=cols, value=[cols[-1]] if cols else []),
+        # 检查通过才放行预览和生成
+        gr.update(interactive=True),
+        gr.update(interactive=True),
     )
 
 
@@ -386,55 +444,50 @@ with gr.Blocks() as demo:
 
     with gr.Tabs():
         with gr.Tab("🤖 模型管理 (Models)"):
-            gr.Markdown("## 🤖 模型列表")
+            gr.Markdown("## 🤖 模型管理")
             gr.Markdown(
-                "本地路径 / HuggingFace / 魔搭 ModelScope 都能加，改完训练和测试的模型下拉自动刷新。"
-                "（以前要手改 `models.json`，现在不用了）"
-            )
-            models_table = gr.Dataframe(
-                headers=["展示名", "来源", "模型ID/路径", "4bit", "精度", "上下文长度"],
-                datatype=["str"] * 6, row_count=(0, "dynamic"), column_count=6,
-                interactive=False, wrap=True, value=_model_rows(),
+                "点左边表格某一行，右边直接改；本地路径 / HuggingFace / 魔搭都能加。"
+                "改完训练和测试的模型下拉自动刷新。"
             )
             with gr.Row():
-                with gr.Column(scale=1):
-                    with gr.Accordion("添加 / 更新（同展示名覆盖）", open=True):
-                        m_display = gr.Textbox(label="展示名（必填，列表里显示的名字）",
-                                               placeholder="如 Qwen3-8B 魔搭版")
-                        m_source = gr.Radio(MODEL_SOURCE_OPTIONS, value="HuggingFace",
-                                            label="来源")
-                        m_id = gr.Textbox(
-                            label="模型 ID / 本地路径（必填）",
-                            placeholder="本地填路径（相对项目根或绝对）；远端填 ID，如 unsloth/Qwen3-8B",
-                            lines=2,
-                        )
-                        with gr.Row():
-                            m_4bit = gr.Checkbox(label="4bit 量化加载", value=True)
-                            m_dtype = gr.Dropdown(label="精度",
-                                                  choices=["自动", "bfloat16", "float16"],
-                                                  value="自动")
-                        with gr.Row():
-                            m_seq = gr.Number(label="上下文长度", value=2048,
-                                              minimum=256, step=256)
-                            m_chat = gr.Textbox(label="chat_template（可选）",
-                                                placeholder="如 qwen-2.5，留空不强制")
-                        m_add_btn = gr.Button("✅ 添加 / 更新模型", variant="primary")
-                with gr.Column(scale=1):
-                    with gr.Accordion("删除 / 刷新", open=True):
-                        m_del = gr.Dropdown(
-                            label="选择要删除的模型",
-                            choices=MODEL_DISPLAY_NAMES,
-                            value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None,
-                        )
-                        with gr.Row():
-                            m_del_btn = gr.Button("🗑 删除所选模型", variant="stop")
-                            m_refresh_btn = gr.Button("🔄 刷新列表")
-                        m_status = gr.Textbox(label="操作状态", interactive=False,
-                                              lines=4, max_lines=10)
-                        gr.Markdown(
-                            "说明：魔搭模型首次训练/加载时自动下载到本地缓存；"
-                            "本地路径必须是已存在的目录；远端 ID 只做格式检查，下载失败会在训练时报错。"
-                        )
+                with gr.Column(scale=3):
+                    models_table = gr.Dataframe(
+                        headers=["展示名", "来源", "模型ID/路径", "4bit", "精度", "上下文长度"],
+                        datatype=["str"] * 6, row_count=(0, "dynamic"), column_count=6,
+                        interactive=False, wrap=True, value=_model_rows(),
+                    )
+                    m_refresh_btn = gr.Button("🔄 刷新列表", size="sm")
+                with gr.Column(scale=2):
+                    m_display = gr.Textbox(label="展示名",
+                                           placeholder="如 Qwen3-8B 魔搭版")
+                    m_source = gr.Radio(MODEL_SOURCE_OPTIONS, value="HuggingFace",
+                                        label="来源")
+                    m_id = gr.Textbox(
+                        label="模型 ID / 本地路径",
+                        placeholder="本地填路径（相对项目根或绝对）；远端填 ID，如 unsloth/Qwen3-8B",
+                        lines=2,
+                    )
+                    with gr.Row():
+                        m_4bit = gr.Checkbox(label="4bit 量化加载", value=True)
+                        m_dtype = gr.Dropdown(label="精度",
+                                              choices=["自动", "bfloat16", "float16"],
+                                              value="自动")
+                    with gr.Row():
+                        m_seq = gr.Number(label="上下文长度", value=2048,
+                                          minimum=256, step=256)
+                        m_chat = gr.Textbox(label="chat_template（可选）",
+                                            placeholder="如 qwen-2.5，留空不强制")
+                    with gr.Row():
+                        m_new_btn = gr.Button("➕ 新建", size="sm")
+                        m_save_btn = gr.Button("💾 保存", variant="primary")
+                        m_del_btn = gr.Button("🗑 删除", variant="stop")
+                    m_status = gr.Textbox(label="操作状态", interactive=False,
+                                          lines=3, max_lines=8)
+                    gr.Markdown(
+                        "魔搭模型首次使用自动下载；本地路径添加时校验存在性；"
+                        "删除要点两次确认。",
+                        elem_classes=["hint"],
+                    )
 
         with gr.Tab("🧹 数据处理 (Data Prep)"):
             gr.Markdown("## 🧹 把任意数据制成统一训练数据")
@@ -498,8 +551,10 @@ with gr.Blocks() as demo:
                             placeholder="如 wukong_v1",
                         )
                         with gr.Row():
-                            prep_preview_btn = gr.Button("👁 预览这行训练数据", variant="secondary")
-                            prep_generate_btn = gr.Button("2. 生成统一训练数据", variant="primary")
+                            prep_preview_btn = gr.Button("👁 预览这行训练数据", variant="secondary",
+                                                         interactive=False)
+                            prep_generate_btn = gr.Button("2. 生成统一训练数据", variant="primary",
+                                                          interactive=False)
                 with gr.Column(scale=2):
                     prep_inspect_output = gr.Textbox(
                         label="列信息与样本", interactive=False, lines=12, max_lines=25,
@@ -536,7 +591,9 @@ with gr.Blocks() as demo:
                             label="选择数据集 (可多选)",
                             multiselect=True,
                         )
-                        refresh_datasets_btn = gr.Button("🔄 刷新数据集列表")
+                        with gr.Row():
+                            refresh_datasets_btn = gr.Button("🔄 刷新数据集列表", size="sm")
+                            preview_btn = gr.Button("👁 预览选中数据集", size="sm")
                         truncate_dataset_checkbox = gr.Checkbox(
                             label="截断数据集用于快速测试",
                             value=True,
@@ -545,7 +602,6 @@ with gr.Blocks() as demo:
                         max_samples_input = gr.Number(
                             value=200, label="截断条数 (勾选截断时生效)", minimum=10, maximum=100000, step=10,
                         )
-                        preview_btn = gr.Button("预览数据集格式")
                     with gr.Accordion("3. LoRA 参数", open=False):
                         lora_r_slider = gr.Slider(4, 64, value=8, step=4, label="LoRA Rank (r)")
                         lora_alpha_slider = gr.Slider(4, 128, value=16, step=4, label="LoRA Alpha")
@@ -571,26 +627,31 @@ with gr.Blocks() as demo:
                     tb_status = gr.Textbox(label="TensorBoard 状态", interactive=False)
                     tensorboard_view = gr.HTML("<p>启动后显示 TensorBoard。</p>")
             gr.Markdown("---\n## 数据集预览")
-            preview_output = gr.Textbox(label="Preview", interactive=False, lines=8, max_lines=20)
+            preview_output = gr.Textbox(label="选中数据集长什么样", interactive=False,
+                                        lines=8, max_lines=20)
             gr.Markdown("---\n## 训练日志与状态")
-            status_output = gr.Textbox(label="Status", interactive=False, lines=5, max_lines=20)
+            status_output = gr.Textbox(label="训练进行到哪了", interactive=False,
+                                       lines=5, max_lines=20)
 
         with gr.Tab("测试 (Inference Playground)"):
-            gr.Markdown("## 与你训练的模型对话")
-            gr.Markdown("**步骤1**: 选择基础模型。**步骤2**: 选择 LoRA 适配器。**步骤3**: 设定系统提示。")
+            gr.Markdown("## 🧠 与你训练的模型对话")
+            gr.Markdown(
+                "**步骤1**: 选基础模型 + LoRA，点载入。**步骤2**: 写系统提示定人设。"
+                "**步骤3**: 直接开聊。换模型先点卸载腾显存。"
+            )
             with gr.Row():
                 inference_model_selector = gr.Dropdown(
-                    label="选择基础模型 (必须与训练时一致)",
+                    label="基础模型 (必须与训练时一致)",
                     choices=MODEL_DISPLAY_NAMES,
                     value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None,
                 )
                 lora_selector_dropdown = gr.Dropdown(
-                    label="选择 LoRA 适配器", choices=list_trained_loras()
+                    label="LoRA 适配器", choices=list_trained_loras()
                 )
-                refresh_lora_btn = gr.Button("刷新 LoRA 列表")
             with gr.Row():
-                load_model_button = gr.Button("载入模型进行测试", variant="primary")
-                unload_model_button = gr.Button("卸载模型释放显存")
+                load_model_button = gr.Button("▶ 载入模型", variant="primary")
+                unload_model_button = gr.Button("⏏ 卸载腾显存")
+                refresh_lora_btn = gr.Button("🔄 刷新 LoRA 列表", size="sm")
             load_status_textbox = gr.Textbox(label="模型加载状态", interactive=False)
             system_prompt_textbox = gr.Textbox(
                 label="系统提示 (System Prompt)",
@@ -612,35 +673,44 @@ with gr.Blocks() as demo:
                 clear_button = gr.Button("清空", scale=1)
 
     # --- 事件绑定 ---
-    # 模型管理 Tab
-    m_add_btn.click(
-        fn=_model_add_or_update,
+    # 模型管理 Tab：主从编辑
+    models_table.select(
+        fn=_model_pick,
+        outputs=[m_display, m_source, m_id, m_4bit, m_dtype, m_seq, m_chat, m_status],
+    )
+    m_new_btn.click(
+        fn=_model_new,
+        outputs=[m_display, m_source, m_id, m_4bit, m_dtype, m_seq, m_chat, m_status],
+    )
+    m_save_btn.click(
+        fn=_model_save,
         inputs=[m_display, m_source, m_id, m_4bit, m_dtype, m_seq, m_chat,
                 model_dropdown, inference_model_selector],
-        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, model_dropdown, inference_model_selector],
     )
     m_del_btn.click(
-        fn=_model_delete,
-        inputs=[m_del, model_dropdown, inference_model_selector],
-        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+        fn=_model_delete_step,
+        inputs=[m_display, model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, model_dropdown, inference_model_selector],
     )
     m_refresh_btn.click(
         fn=_models_refresh,
         inputs=[model_dropdown, inference_model_selector],
-        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, model_dropdown, inference_model_selector],
     )
 
     # 数据处理 Tab
     prep_source_radio.change(
         fn=_prep_source_ui,
         inputs=[prep_source_radio],
-        outputs=[prep_upload, prep_hf_id, prep_hf_split, prep_existing],
+        outputs=[prep_upload, prep_hf_id, prep_hf_split, prep_existing,
+                 prep_preview_btn, prep_generate_btn],
     )
     prep_inspect_btn.click(
         fn=_prep_inspect,
         inputs=[prep_source_radio, prep_upload, prep_hf_id, prep_hf_split, prep_existing],
         outputs=[prep_inspect_output, prep_state, prep_ins_col, prep_input_col,
-                 prep_think_col, prep_out_col],
+                 prep_think_col, prep_out_col, prep_preview_btn, prep_generate_btn],
     )
     prep_preview_btn.click(
         fn=_prep_preview_row,
