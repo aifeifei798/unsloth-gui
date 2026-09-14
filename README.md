@@ -109,6 +109,8 @@
 没有会自动套上）；空回复的行会自动丢弃并计数。产物在 `local_data/processed/<名称>/`
 （`data.jsonl` + `hf_dataset/` + `manifest.json`），配置自动写入
 `datasets_config/`，不用手写 JSON。
+「🗂 数据管理」Tab 可查看行数/大小/映射详情、看样本、重命名、删除
+（只删本工具生成的产物，原始文件不动）。
 
 **示例 `datasets_config/alpaca_cleaned.json`:**
 

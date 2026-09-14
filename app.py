@@ -20,6 +20,7 @@ import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
 from src.config import load_models_config, save_models_config, ModelConfig, model_source
+from src.data_mgmt import delete_entry, detail_text, list_entries, rename_entry, sample_text
 from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
@@ -227,6 +228,101 @@ def _models_refresh(cur_train, cur_inf):
     dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
     return (msg, gr.update(value=_model_rows()), dd_train, dd_inf)
 
+
+# --- 数据管理：主从查看 + 样本/重命名/两步删除 ---
+_data_del_armed: str | None = None
+
+
+def _data_rows():
+    return [[e["name"], e["rows"], e["source"], e["created"], e["size"],
+             ("✅" if e["trainable"] else "❌")] for e in list_entries()]
+
+
+def _reset_data_arm():
+    global _data_del_armed
+    _data_del_armed = None
+
+
+def _map_train_sel(cur, old=None, new=None):
+    vals = list(cur or [])
+    if old is not None:
+        vals = [new if v == old else v for v in vals] if new else [
+            v for v in vals if v != old]
+    vals = [v for v in vals if v in DATASET_DISPLAY_NAMES]
+    return gr.update(choices=DATASET_DISPLAY_NAMES, value=vals)
+
+
+def _map_prep_sel(cur, old=None, new=None):
+    if old is not None:
+        cur = new if cur == old and new else (None if cur == old else cur)
+    return gr.update(choices=ALL_DATASET_NAMES,
+                     value=cur if cur in ALL_DATASET_NAMES else (
+                         ALL_DATASET_NAMES[0] if ALL_DATASET_NAMES else None))
+
+
+def _data_pick(evt: gr.SelectData):
+    _reset_data_arm()
+    try:
+        idx = evt.index[0] if evt is not None and evt.index else None
+    except Exception:
+        idx = None
+    entries = list_entries()
+    if idx is None or not (0 <= idx < len(entries)):
+        return "", "❌ 请点击表格中的某一行。"
+    name = entries[idx]["name"]
+    return name, detail_text(name)
+
+
+def _data_sample(name):
+    if not name:
+        return "❌ 先在左边点选一行，再看样本。"
+    return sample_text(name)
+
+
+def _data_delete_step(name, cur_train, cur_prep):
+    global _data_del_armed
+    if not name:
+        return ("❌ 先在左边点选一行。",) + (gr.update(),) * 5
+    if _data_del_armed != name:
+        _data_del_armed = name
+        return (f"⚠️ 再点一次「删除」确认删除 '{name}'。点其他按钮自动取消。",
+                ) + (gr.update(),) * 5
+    _data_del_armed = None
+    msg = delete_entry(name)
+    if msg.startswith("❌"):
+        return (msg,) + (gr.update(),) * 5
+    _reload_datasets()
+    return (msg, gr.update(value=_data_rows()), "", "已删除，点其他行查看。",
+            _map_train_sel(cur_train, old=name),
+            _map_prep_sel(cur_prep, old=name))
+
+
+def _data_rename(name, new_name, cur_train, cur_prep):
+    _reset_data_arm()
+    try:
+        new = rename_entry(name or "", new_name or "")
+    except ValueError as e:
+        return (f"❌ 重命名失败: {e}",) + (gr.update(),) * 5
+    _reload_datasets()
+    return (f"✅ 已重命名为 '{new}'。",
+            gr.update(value=_data_rows()), new, detail_text(new),
+            _map_train_sel(cur_train, old=name, new=new),
+            _map_prep_sel(cur_prep, old=name, new=new))
+
+
+def _data_refresh(cur_train, cur_prep, selected):
+    _reset_data_arm()
+    warns = _reload_datasets()
+    names = [e["name"] for e in list_entries()]
+    if selected and selected in names:
+        detail, sel = detail_text(selected), selected
+    else:
+        detail, sel = "点左边某一行查看详情。", ""
+    msg = (f"已刷新：共 {len(names)} 个数据。"
+           + (f"\n⚠️ {warns}" if warns else ""))
+    return (msg, gr.update(value=_data_rows()), sel, detail,
+            _map_train_sel(cur_train), _map_prep_sel(cur_prep))
+
 # --- 纯视觉主题（不影响任何功能逻辑） ---
 APP_THEME = gr.themes.Soft(
     primary_hue=gr.themes.colors.indigo,
@@ -417,13 +513,14 @@ def _prep_generate(state, ins_cols, input_cols, think_cols, out_cols, fixed_ins,
             state or {}, ins_cols, input_cols, think_cols, out_cols, name,
             fixed_instruction=fixed_ins or "", progress=progress)
     except Exception as e:
-        return f"❌ 生成失败: {e}", "", gr.update(), gr.update()
+        return f"❌ 生成失败: {e}", "", gr.update(), gr.update(), gr.update()
     warns = _reload_datasets()
     msg = status + (f"\n⚠️ 配置告警: {warns}" if warns else "")
     return (
         msg, preview,
         gr.update(choices=DATASET_DISPLAY_NAMES, value=[new_name]),
         gr.update(choices=ALL_DATASET_NAMES),
+        gr.update(value=_data_rows()),
     )
 
 
@@ -488,6 +585,36 @@ with gr.Blocks() as demo:
                         "删除要点两次确认。",
                         elem_classes=["hint"],
                     )
+
+        with gr.Tab("🗂 数据管理 (Data)"):
+            gr.Markdown("## 🗂 数据管理")
+            gr.Markdown(
+                "点左边某一行看详情；只删本工具生成的产物（统一数据目录 + 配置），"
+                "原始上传文件和自带示例不动。"
+            )
+            with gr.Row():
+                with gr.Column(scale=2):
+                    data_table = gr.Dataframe(
+                        headers=["名称", "行数", "来源", "创建", "大小", "可训练"],
+                        datatype=["str"] * 6, row_count=(0, "dynamic"), column_count=6,
+                        interactive=False, wrap=True, value=_data_rows(),
+                    )
+                    d_refresh_btn = gr.Button("🔄 刷新", size="sm")
+                with gr.Column(scale=3):
+                    d_detail = gr.Textbox(label="详情", interactive=False,
+                                          lines=10, max_lines=20,
+                                          value="点左边某一行查看详情。")
+                    d_sample = gr.Textbox(label="样本预览（点按钮才加载，远端会下载）",
+                                          interactive=False, lines=10, max_lines=20)
+                    d_new_name = gr.Textbox(label="新名称（重命名用）",
+                                            placeholder="如 wukong_v2")
+                    with gr.Row():
+                        d_sample_btn = gr.Button("👁 看样本", variant="secondary", size="sm")
+                        d_rename_btn = gr.Button("✏️ 重命名", size="sm")
+                        d_del_btn = gr.Button("🗑 删除", variant="stop", size="sm")
+                    d_status = gr.Textbox(label="操作状态", interactive=False,
+                                          lines=3, max_lines=8)
+            d_selected = gr.State("")
 
         with gr.Tab("🧹 数据处理 (Data Prep)"):
             gr.Markdown("## 🧹 把任意数据制成统一训练数据")
@@ -673,6 +800,35 @@ with gr.Blocks() as demo:
                 clear_button = gr.Button("清空", scale=1)
 
     # --- 事件绑定 ---
+    # 数据管理 Tab：主从查看
+    data_table.select(
+        fn=_data_pick,
+        outputs=[d_selected, d_detail],
+    )
+    d_sample_btn.click(
+        fn=_data_sample,
+        inputs=[d_selected],
+        outputs=[d_sample],
+    )
+    d_del_btn.click(
+        fn=_data_delete_step,
+        inputs=[d_selected, dataset_dropdown, prep_existing],
+        outputs=[d_status, data_table, d_selected, d_detail,
+                 dataset_dropdown, prep_existing],
+    )
+    d_rename_btn.click(
+        fn=_data_rename,
+        inputs=[d_selected, d_new_name, dataset_dropdown, prep_existing],
+        outputs=[d_status, data_table, d_selected, d_detail,
+                 dataset_dropdown, prep_existing],
+    )
+    d_refresh_btn.click(
+        fn=_data_refresh,
+        inputs=[dataset_dropdown, prep_existing, d_selected],
+        outputs=[d_status, data_table, d_selected, d_detail,
+                 dataset_dropdown, prep_existing],
+    )
+
     # 模型管理 Tab：主从编辑
     models_table.select(
         fn=_model_pick,
@@ -722,7 +878,7 @@ with gr.Blocks() as demo:
         fn=_prep_generate,
         inputs=[prep_state, prep_ins_col, prep_input_col, prep_think_col, prep_out_col,
                 prep_fixed_ins, prep_name],
-        outputs=[prep_status, prep_preview, dataset_dropdown, prep_existing],
+        outputs=[prep_status, prep_preview, dataset_dropdown, prep_existing, data_table],
     )
     refresh_datasets_btn.click(
         fn=_refresh_train_datasets,
