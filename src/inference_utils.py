@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .config import PROJECT_ROOT
+from .i18n import t
 
 OUTPUTS_PARENT_DIR = PROJECT_ROOT / "outputs"
 
@@ -33,8 +34,8 @@ def list_trained_loras() -> list[str]:
 
 def loaded_info() -> str:
     if _mgr["model"] is None:
-        return "未加载模型。"
-    return f"已加载: base={_mgr['base']} + lora={_mgr['lora']}"
+        return t("inf.not_loaded")
+    return t("inf.status_loaded", base=_mgr["base"], lora=_mgr["lora"])
 
 
 def unload_model() -> str:
@@ -47,7 +48,7 @@ def unload_model() -> str:
             torch.cuda.empty_cache()
     except Exception:
         pass
-    return "已卸载模型并释放显存。"
+    return t("inf.unloaded")
 
 
 def _device() -> str:
@@ -60,19 +61,19 @@ def _device() -> str:
 
 def load_inference_model(base_model_name: str, lora_name: str, progress=None) -> str:
     if not base_model_name or not lora_name:
-        return "错误：必须同时选择一个基础模型和一个 LoRA 适配器。"
+        return t("inf.need_both")
     from .config import load_models_config, find_by_name
 
     model_cfg = find_by_name(load_models_config(), base_model_name)
     if model_cfg is None:
-        return f"错误：找不到基础模型 '{base_model_name}'。"
+        return t("inf.no_base", name=base_model_name)
     lora_path = OUTPUTS_PARENT_DIR / lora_name
     if not lora_path.exists():
-        return f"错误：LoRA 目录未找到: {lora_path}"
+        return t("inf.no_lora", path=lora_path)
 
     # 同模型同 LoRA 已加载则跳过
     if _mgr["model"] is not None and _mgr["base"] == base_model_name and _mgr["lora"] == lora_name:
-        return f"模型 '{lora_name}' 已在显存中，可直接对话。"
+        return t("inf.already", name=lora_name)
 
     with _mgr_lock:
         # 先卸旧模型防 OOM
@@ -87,7 +88,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
         try:
             if progress is not None:
                 try:
-                    progress(0.2, desc=f"加载基础模型: {model_cfg.model_id}...")
+                    progress(0.2, desc=t("inf.loading_base", id=model_cfg.model_id))
                 except Exception:
                     pass
             from unsloth import FastLanguageModel
@@ -96,7 +97,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
             try:
                 model_path = ensure_local_model(model_cfg)
             except Exception as e:
-                return f"❌ 模型地址解析失败: {e}"
+                return t("inf.resolve_fail", err=e)
             seq_len = int(getattr(model_cfg, "max_seq_length", 2048) or 2048)
             model, tokenizer = FastLanguageModel.from_pretrained(
                 model_name=model_path,
@@ -112,7 +113,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                     pass
             if progress is not None:
                 try:
-                    progress(0.6, desc=f"应用 LoRA: {lora_name}...")
+                    progress(0.6, desc=t("inf.loading_lora", name=lora_name))
                 except Exception:
                     pass
             loaded = False
@@ -129,16 +130,16 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                     model = PeftModel.from_pretrained(model, str(lora_path))
                     loaded = True
                 except Exception as e:
-                    return f"❌ LoRA 挂载失败: {e}"
+                    return t("inf.mount_fail", err=e)
             try:
                 FastLanguageModel.for_inference(model)
             except Exception:
                 pass
             _mgr.update(model=model, tokenizer=tokenizer, base=base_model_name, lora=lora_name)
-            return f"✅ 模型 '{lora_name}' 加载成功！可以开始对话了。"
+            return t("inf.loaded", name=lora_name)
         except Exception as e:
             import traceback
-            return f"❌ 模型加载失败: {e}\n{traceback.format_exc(limit=6)}"
+            return t("inf.load_fail", err=e, trace=traceback.format_exc(limit=6))
 
 
 def run_chat(user_input: str, history: Optional[list], system_prompt: str,
@@ -155,7 +156,7 @@ def run_chat(user_input: str, history: Optional[list], system_prompt: str,
     if model is None or tokenizer is None:
         history = history + [
             {"role": "user", "content": user_input},
-            {"role": "assistant", "content": "错误：模型未加载。请先选择并加载一个模型。"},
+            {"role": "assistant", "content": t("inf.model_missing")},
         ]
         yield history
         return
@@ -173,7 +174,7 @@ def run_chat(user_input: str, history: Optional[list], system_prompt: str,
         try:
             from transformers.generation.streamers import TextIteratorStreamer
         except Exception as e:
-            history[-1]["content"] = f"流式器不可用: {e}"
+            history[-1]["content"] = t("inf.no_streamer", err=e)
             yield history
             return
 

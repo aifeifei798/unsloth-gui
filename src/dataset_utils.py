@@ -6,6 +6,7 @@ import string
 from pathlib import Path
 
 from .config import DatasetConfig
+from .i18n import t
 
 
 def validate_template_columns(cfg: DatasetConfig) -> list[str]:
@@ -32,19 +33,14 @@ def _format_row(prompt_template: str, column_mappings: dict, row: dict, idx: int
     fmt: dict = {}
     for placeholder, col in column_mappings.items():
         if col not in row:
-            raise ValueError(
-                f"第 {idx} 行缺少列 '{col}'（input_columns 映射 '{placeholder}' -> '{col}'）。"
-                f"该数据集实际列: {sorted(row.keys())}。请检查 datasets_config 映射。"
-            )
+            raise ValueError(t("cfg.ds_col_missing", i=idx, col=col, ph=placeholder,
+                               actual=sorted(row.keys())))
         v = row[col]
         fmt[placeholder] = "" if v is None else str(v)
     try:
         return drop_empty_sections(prompt_template.format(**fmt))
     except KeyError as e:
-        raise ValueError(
-            f"prompt_template 里的占位符 {e} 在 input_columns Lima没有对应 key。"
-            f"template 需要: {sorted(fmt.keys())}。请检查 JSON 配置。"
-        ) from e
+        raise ValueError(t("cfg.ds_tpl_key", key=e, need=sorted(fmt.keys()))) from e
 
 
 def prepare_dataset(
@@ -64,10 +60,8 @@ def prepare_dataset(
     ds_path = cfg.resolved_dataset_id()
     missing = validate_template_columns(cfg)
     if missing:
-        raise ValueError(
-            f"数据集 '{cfg.display_name}' 的 prompt_template 占位符 {missing} "
-            f"在 input_columns {sorted(cfg.input_columns.keys())} 中找不到对应。"
-        )
+        raise ValueError(t("cfg.tpl_missing", name=cfg.display_name, missing=missing,
+                           keys=sorted(cfg.input_columns.keys())))
 
     p = Path(ds_path)
     if p.exists():
@@ -75,7 +69,7 @@ def prepare_dataset(
             try:
                 dataset = load_from_disk(ds_path)
             except Exception as e:
-                raise RuntimeError(f"本地数据集加载失败 {ds_path}: {e}") from e
+                raise RuntimeError(t("dp.err.disk_fail", path=ds_path, err=e)) from e
         elif p.suffix in (".jsonl", ".json"):
             dataset = load_dataset("json", data_files=ds_path, split="train")
         elif p.suffix == ".csv":
@@ -83,10 +77,10 @@ def prepare_dataset(
         elif p.suffix == ".txt":
             dataset = load_dataset("text", data_files=ds_path, split="train")
         else:
-            raise ValueError(f"不支持的本地数据格式: {ds_path}（支持目录/jsonl/json/csv/txt）")
+            raise ValueError(t("cfg.ds_bad_format", path=p))
     else:
         if cfg.is_local:
-            raise FileNotFoundError(f"本地数据集路径未找到: {ds_path}")
+            raise FileNotFoundError(t("cfg.ds_path_missing", path=ds_path))
         dataset = load_dataset(cfg.dataset_id, split=cfg.split)
 
     # 兼容 DatasetDict（load_from_disk 可能存的是切分 dict）
@@ -102,9 +96,8 @@ def prepare_dataset(
         cols = list(column_mappings.values())
         for c in cols:
             if c not in examples:
-                raise ValueError(
-                    f"数据集 '{cfg.display_name}' 缺少列 '{c}'，实际列: {sorted(examples.keys())}。"
-                )
+                raise ValueError(t("cfg.ds_need_col", name=cfg.display_name, col=c,
+                                   actual=sorted(examples.keys())))
         texts = []
         for i in range(len(examples[cols[0]])):
             row = {c: examples[c][i] for c in cols}
@@ -123,7 +116,7 @@ def combine_datasets(datasets: list):
     from datasets import concatenate_datasets
 
     if not datasets:
-        raise ValueError("没有可合并的数据集。")
+        raise ValueError(t("cfg.ds_empty_combine"))
     if len(datasets) == 1:
         ds = datasets[0]
         keep = [c for c in ["text"] if c in ds.column_names]
@@ -131,7 +124,7 @@ def combine_datasets(datasets: list):
     aligned = []
     for ds in datasets:
         if "text" not in ds.column_names:
-            raise ValueError(f"某个数据集缺少 text 列，实际列: {ds.column_names}")
+            raise ValueError(t("cfg.ds_no_text", cols=ds.column_names))
         aligned.append(ds.remove_columns([c for c in ds.column_names if c != "text"]))
     return concatenate_datasets(aligned)
 
@@ -141,21 +134,19 @@ def dataset_preview_text(cfg: DatasetConfig, n: int = 3, max_chars: int = 1200) 
     try:
         ds = prepare_dataset(cfg, truncate_for_testing=True, max_samples=max(20, n))
     except Exception as e:
-        return f"❌ 预览失败: {e}"
+        return t("cfg.ds_preview_fail", err=e)
     lines = [
-        f"数据集: {cfg.display_name}",
-        f"来源: {cfg.resolved_dataset_id()} | 切分: {cfg.split}",
-        f"原始列: {ds.column_names} | 总条数(已截断预览): {len(ds)}",
-        "-" * 60,
+        t("cfg.ds_preview_head", name=cfg.display_name, src=cfg.resolved_dataset_id(),
+          split=cfg.split, cols=ds.column_names, n=len(ds)),
     ]
     for i in range(min(n, len(ds))):
-        t = ds[i]["text"]
-        if len(t) > max_chars:
-            t = t[:max_chars] + f"\n…(截断，共 {len(ds[i]['text'])} 字符)"
-        lines.append(f"[样本 {i+1}]\n{t}\n" + "-" * 60)
+        text = ds[i]["text"]
+        if len(text) > max_chars:
+            text = text[:max_chars] + t("cfg.ds_preview_trunc", n=len(ds[i]["text"]))
+        lines.append(t("cfg.ds_preview_sample", i=i + 1, text=text))
     bad = validate_template_columns(cfg)
     if bad:
-        lines.append(f"⚠️ template 占位符缺映射: {bad}")
+        lines.append(t("cfg.ds_preview_tpl_warn", missing=bad))
     return "\n".join(lines)
 
 

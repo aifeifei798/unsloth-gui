@@ -7,6 +7,7 @@ import subprocess
 from typing import Optional
 
 from .config import PROJECT_ROOT
+from .i18n import t
 
 LOGS_PARENT_DIR = PROJECT_ROOT / "logs"
 _PROC: Optional[subprocess.Popen] = None
@@ -30,12 +31,12 @@ def launch_tensorboard(port: int = 6006) -> tuple[bool, str, int]:
     """返回 (ok, message, port). 已在运行则复用；端口被占则自动顺延."""
     global _PROC, _PORT
     if _PROC is not None and _PROC.poll() is None:
-        return True, f"TensorBoard 已在运行 (:{_PORT})", _PORT
+        return True, t("tb.running", port=_PORT), _PORT
     LOGS_PARENT_DIR.mkdir(parents=True, exist_ok=True)
     if _port_in_use(port):
         # 可能是外部已启动的 TB，直接复用
         _PORT = port
-        return True, f"端口 {port} 已被占用，复用现有 TensorBoard。", port
+        return True, t("tb.reused", port=port), port
     free = _find_free_port(port)
     try:
         _PROC = subprocess.Popen(
@@ -44,11 +45,11 @@ def launch_tensorboard(port: int = 6006) -> tuple[bool, str, int]:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except FileNotFoundError:
-        return False, "未找到 tensorboard 可执行文件，请 pip install tensorboard。", free
+        return False, t("tb.no_bin"), free
     except Exception as e:
-        return False, f"TensorBoard 启动失败: {e}", free
+        return False, t("tb.fail", err=e), free
     _PORT = free
-    return True, f"TensorBoard 已启动 (:{free})", free
+    return True, t("tb.started", port=free), free
 
 
 def stop_tensorboard() -> None:

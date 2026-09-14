@@ -12,6 +12,7 @@ from typing import Optional
 
 from .config import DatasetConfig, find_by_name, load_datasets_config
 from .dataprep import DATASETS_CONFIG_DIR, PROCESSED_ROOT, sanitize_name
+from .i18n import t
 
 
 def _human_size(n: int) -> str:
@@ -66,7 +67,7 @@ def entry_info(cfg: DatasetConfig) -> dict:
         except Exception:
             info["rows"] = "?"
             info["created"] = "—"
-        info["source"] = "统一数据"
+        info["source"] = t("dm.src.unified")
         try:
             info["size"] = _human_size(_dir_size(art.parent))
         except Exception:
@@ -84,13 +85,13 @@ def entry_info(cfg: DatasetConfig) -> dict:
             info["rows"] = str(n)
         except Exception:
             info["rows"] = "?"
-        info["source"] = "本地文件"
+        info["source"] = t("dm.src.local_file")
         try:
             info["size"] = _human_size(p.stat().st_size)
         except Exception:
             info["size"] = "—"
     elif p is not None and p.is_dir():
-        info["source"] = "本地目录"
+        info["source"] = t("dm.src.local_dir")
         try:
             from datasets import load_from_disk
             info["rows"] = str(len(load_from_disk(str(p))))
@@ -101,8 +102,8 @@ def entry_info(cfg: DatasetConfig) -> dict:
         except Exception:
             info["size"] = "—"
     else:
-        info["source"] = "HuggingFace" if not cfg.is_local else "本地（缺失）"
-        info["rows"] = "远端"
+        info["source"] = t("dm.src.hf") if not cfg.is_local else t("dm.src.local_missing")
+        info["rows"] = t("dm.rows.remote")
         info["size"] = "—"
     info["created"] = "—"
     return info
@@ -119,16 +120,16 @@ def detail_text(name: str) -> str:
     try:
         cfgs = load_datasets_config()
     except Exception as e:
-        return f"❌ 配置读取失败: {e}"
+        return t("dm.err.config", err=e)
     cfg = find_by_name(cfgs, name)
     if cfg is None:
-        return f"❌ 找不到 '{name}'。"
+        return t("dm.err.notfound", name=name)
     info = entry_info(cfg)
     lines = [
-        f"名称: {info['name']}",
-        f"来源: {info['source']} | 行数: {info['rows']} | 大小: {info['size']}",
-        f"可训练: {'✅（统一数据）' if info['trainable'] else '❌（去数据处理制成统一数据）'}",
-        f"地址: {cfg.dataset_id}",
+        t("dm.detail.name", v=info["name"]),
+        t("dm.detail.meta", source=info["source"], rows=info["rows"], size=info["size"]),
+        t("dm.detail.trainable_yes") if info["trainable"] else t("dm.detail.trainable_no"),
+        t("dm.detail.addr", v=cfg.dataset_id),
         "-" * 50,
     ]
     art = _artifact_dir(cfg)
@@ -136,20 +137,24 @@ def detail_text(name: str) -> str:
         try:
             man = json.load(open(art.parent / "manifest.json", "r", encoding="utf-8"))
             mp = man.get("mapping", {})
-            lines.append("映射: " + " + ".join(f"{k}({len(v)}列)" for k, v in mp.items() if v))
+            lines.append(t("dm.detail.mapping",
+                           v=" + ".join(t("dm.detail.map_role", k=k, n=len(v))
+                                         for k, v in mp.items() if v)))
             if man.get("fixed_instruction"):
-                lines.append(f"固定指令: {man['fixed_instruction'][:200]}")
-            lines.append(f"原始 {man.get('rows_total')} 行 → 保留 {man.get('rows_kept')} 行"
-                         + (f"（丢空回复 {man.get('rows_dropped_empty_output')}）"
+                lines.append(t("dm.detail.fixed", v=man["fixed_instruction"][:200]))
+            lines.append(t("dm.detail.rows", total=man.get("rows_total"),
+                           kept=man.get("rows_kept"))
+                         + (t("dm.detail.dropped",
+                              n=man.get("rows_dropped_empty_output"))
                             if man.get("rows_dropped_empty_output") else ""))
-            lines.append(f"生成时间: {man.get('created', '—')}")
+            lines.append(t("dm.detail.created", v=man.get("created", "—")))
         except Exception:
             pass
     else:
-        lines.append("模板:")
+        lines.append(t("dm.detail.template"))
         lines.append((cfg.prompt_template[:500] + "…") if len(cfg.prompt_template) > 500
                      else cfg.prompt_template)
-        lines.append(f"列映射: {cfg.input_columns}")
+        lines.append(t("dm.detail.columns", v=cfg.input_columns))
     return "\n".join(lines)
 
 
@@ -159,51 +164,51 @@ def sample_text(name: str, n: int = 2) -> str:
     try:
         cfg = find_by_name(load_datasets_config(), name)
     except Exception as e:
-        return f"❌ 配置读取失败: {e}"
+        return t("dm.err.config", err=e)
     if cfg is None:
-        return f"❌ 找不到 '{name}'。"
+        return t("dm.err.notfound", name=name)
     return dataset_preview_text(cfg, n=n)
 
 
 def delete_entry(name: str) -> str:
     fp = _find_config_file(name)
     if fp is None:
-        return f"❌ 找不到 '{name}' 的配置文件。"
+        return t("dm.err.nofile", name=name)
     try:
         cfg = find_by_name(load_datasets_config(), name)
     except Exception as e:
-        return f"❌ 配置读取失败: {e}"
-    removed = [f"配置 {fp.name}"]
+        return t("dm.err.config", err=e)
+    removed = [t("dm.del.config", file=fp.name)]
     art = _artifact_dir(cfg) if cfg is not None else None
     if art is not None:
         shutil.rmtree(art.parent, ignore_errors=True)
-        removed.append(f"产物目录 processed/{art.parent.name}/")
+        removed.append(t("dm.del.artifact", dir=art.parent.name))
     fp.unlink(missing_ok=True)
-    kept = "原始上传文件和自带示例不受影响。" if art is None else ""
-    return f"🗑 已删除 '{name}'（{' + '.join(removed)}）。{kept}".strip()
+    kept = t("dm.del.kept") if art is None else ""
+    return t("dm.deleted", name=name, parts=" + ".join(removed), kept=kept).strip()
 
 
 def rename_entry(old: str, new: str) -> str:
     """返回新展示名。产物目录跟着搬家，配置地址同步改。"""
     new = sanitize_name(new)
     if not old:
-        raise ValueError("请先在左边点选一行。")
+        raise ValueError(t("dm.err.noselect"))
     if new == old:
-        raise ValueError("新旧名字一样，不用改。")
+        raise ValueError(t("dm.err.same"))
     try:
         cfgs = load_datasets_config()
     except Exception as e:
-        raise ValueError(f"配置读取失败: {e}")
+        raise ValueError(t("dm.err.config_plain", err=e))
     if find_by_name(cfgs, old) is None:
-        raise ValueError(f"找不到 '{old}'。")
+        raise ValueError(t("dm.err.notfound_plain", name=old))
     if find_by_name(cfgs, new) is not None:
-        raise ValueError(f"名字 '{new}' 已被占用，换一个。")
+        raise ValueError(t("dm.err.used", new=new))
     fp = _find_config_file(old)
     if fp is None:
-        raise ValueError(f"找不到 '{old}' 的配置文件。")
+        raise ValueError(t("dm.err.nofile", name=old))
     new_fp = DATASETS_CONFIG_DIR / f"{new}.json"
     if new_fp.exists():
-        raise ValueError(f"配置文件 {new_fp.name} 已存在，换个名字。")
+        raise ValueError(t("dm.err.file_exists", file=new_fp.name))
     with open(fp, "r", encoding="utf-8") as f:
         data = json.load(f)
     cfg = find_by_name(cfgs, old)
@@ -211,7 +216,7 @@ def rename_entry(old: str, new: str) -> str:
     if art is not None:
         target = PROCESSED_ROOT / new
         if target.exists():
-            raise ValueError(f"产物目录 processed/{new}/ 已存在，换个名字。")
+            raise ValueError(t("dm.err.dir_exists", dir=new))
         art.parent.rename(target)
         data["dataset_id"] = f"./local_data/processed/{new}/hf_dataset"
         try:

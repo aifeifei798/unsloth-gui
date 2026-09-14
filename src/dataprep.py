@@ -25,6 +25,7 @@ from typing import Optional
 
 from .config import PROJECT_ROOT, DatasetConfig
 from .dataset_utils import drop_empty_sections
+from .i18n import t
 
 PROCESSED_ROOT = PROJECT_ROOT / "local_data" / "processed"
 UPLOAD_ROOT = PROJECT_ROOT / "local_data" / "uploads"
@@ -33,8 +34,13 @@ DATASETS_CONFIG_DIR = PROJECT_ROOT / "datasets_config"
 SCHEMA_VERSION = 3
 
 ROLES = ("instruction", "input", "think", "output")
-ROLE_LABEL = {"instruction": "instruction 输入", "input": "input 上下文",
-              "think": "think 思维链", "output": "output 回复"}
+
+
+def role_label(role: str) -> str:
+    """角色展示名（跟随界面语言）."""
+    return {"instruction": t("dp.role.instruction"), "input": t("dp.role.input"),
+            "think": t("dp.role.think"),
+            "output": t("dp.role.output")}.get(role, role)
 
 
 def build_template(use_input: bool) -> tuple[str, dict]:
@@ -66,7 +72,7 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
 
     if kind == "existing":
         if existing is None:
-            raise ValueError("请选择一个已有数据集配置。")
+            raise ValueError(t("dp.err.no_config"))
         p = Path(existing.resolved_dataset_id())
         if p.exists():
             if p.is_dir():
@@ -80,19 +86,19 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
             elif p.suffix == ".txt":
                 ds = load_dataset("text", data_files=str(p), split="train", streaming=streaming)
             else:
-                raise ValueError(f"不支持的本地格式: {p}（支持目录/jsonl/json/csv/parquet/txt）")
+                raise ValueError(t("dp.err.bad_local", p=p))
         else:
             if existing.is_local:
-                raise FileNotFoundError(f"本地路径未找到: {p}")
+                raise FileNotFoundError(t("dp.err.local_missing", p=p))
             ds = load_dataset(existing.dataset_id, split=existing.split, streaming=streaming)
     elif kind == "hf":
         hf_id = (hf_id or "").strip()
         if not hf_id:
-            raise ValueError("请填写 HuggingFace 数据集 ID（如 yahma/alpaca-cleaned）。")
+            raise ValueError(t("dp.err.no_hf"))
         ds = load_dataset(hf_id, split=(split or "train").strip() or "train", streaming=streaming)
     elif kind == "upload":
         if not local_path or not Path(local_path).is_file():
-            raise ValueError("请先上传文件（支持 .jsonl / .json / .csv / .parquet / .txt）。")
+            raise ValueError(t("dp.err.no_upload"))
         p = Path(local_path)
         if p.suffix in (".jsonl", ".json"):
             ds = load_dataset("json", data_files=str(p), split="train", streaming=streaming)
@@ -103,9 +109,9 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
         elif p.suffix == ".txt":
             ds = load_dataset("text", data_files=str(p), split="train", streaming=streaming)
         else:
-            raise ValueError(f"不支持的上传格式: {p.suffix}")
+            raise ValueError(t("dp.err.bad_upload", s=p.suffix))
     else:
-        raise ValueError(f"未知来源: {kind}")
+        raise ValueError(t("dp.err.bad_kind", k=kind))
 
     if hasattr(ds, "keys") and not hasattr(ds, "map"):  # DatasetDict
         want = (split or "").strip()
@@ -131,7 +137,7 @@ def peek_source(kind: str, hf_id: str = "", split: str = "train",
         from datasets import load_dataset
         ds_id = hf_id.strip() if kind == "hf" else existing.dataset_id
         if not ds_id:
-            raise ValueError("请填写 HuggingFace 数据集 ID。")
+            raise ValueError(t("dp.err.no_hf_id"))
         ds = load_dataset(ds_id, split=split, streaming=True)
         cols = list(ds.column_names or [])
         try:
@@ -164,19 +170,19 @@ def inspect_text(kind: str, hf_id: str = "", split: str = "train",
         split = (existing.split or "train").strip() or "train"
     cols, row, n_rows, streamed = peek_source(kind, hf_id, split, local_path, existing)
     if not cols:
-        raise ValueError("未能读到任何列，请检查来源与切分名。")
-    count_line = ("总行数: 未知（流式预览，点生成时全量拉取）" if streamed
-                  else f"总行数: {n_rows}")
+        raise ValueError(t("dp.err.no_columns"))
+    count_line = (t("dp.inspect.unknown") if streamed
+                  else t("dp.inspect.total", n=n_rows))
     lines = [
         count_line,
-        f"列名 ({len(cols)}): {', '.join(cols)}",
+        t("dp.inspect.cols", n=len(cols), cols=", ".join(cols)),
         "-" * 60,
     ]
     if row is None:
-        lines.append("(空数据集，没有可预览的行)")
+        lines.append(t("dp.inspect.empty"))
     else:
         preview = {k: (str(v)[:300] + "…" if len(str(v)) > 300 else v) for k, v in row.items()}
-        lines.append("[预览第 1 行]\n" + json.dumps(preview, ensure_ascii=False, indent=1))
+        lines.append(t("dp.inspect.sample") + "\n" + json.dumps(preview, ensure_ascii=False, indent=1))
         lines.append("-" * 60)
     state = {"kind": kind, "hf_id": hf_id, "split": split,
              "local_path": local_path,
@@ -219,19 +225,19 @@ def resolve_mapping(columns: list, instruction_cols, input_cols,
     for role, selected in mapping.items():
         for c in selected:
             if c not in columns:
-                raise ValueError(f"{ROLE_LABEL[role]}里有不存在的列 '{c}'，实际列: {columns}。")
+                raise ValueError(t("dp.err.bad_col", role=role_label(role), c=c,
+                                   columns=columns))
     fixed_ins = (fixed_instruction or "").strip()
     if not mapping["instruction"] and not fixed_ins:
-        raise ValueError("instruction 没有映射任何列，请至少选择 1 列，或在「固定指令」里手写一句。")
+        raise ValueError(t("dp.err.no_ins"))
     if not mapping["output"]:
-        raise ValueError("请至少选择 1 列作为 output 回复。")
+        raise ValueError(t("dp.err.no_out"))
     seen: dict[str, str] = {}
     for role, selected in mapping.items():
         for c in selected:
             if c in seen:
-                raise ValueError(
-                    f"列 '{c}' 同时被映射为{ROLE_LABEL[seen[c]]}和{ROLE_LABEL[role]}，"
-                    f"一列只能担任一个角色。")
+                raise ValueError(t("dp.err.dup_col", c=c, role1=role_label(seen[c]),
+                                   role2=role_label(role)))
             seen[c] = role
     return mapping, fixed_ins
 
@@ -264,27 +270,32 @@ def format_unified_row(row: dict, mapping: dict, fixed_ins: str = "") -> Optiona
     }
 
 
+def _roles_desc(mapping: dict) -> str:
+    desc = " + ".join(t("dp.roles", role=role, n=len(mapping[role]))
+                      for role in ROLES if mapping[role])
+    if mapping["think"]:
+        desc += t("dp.roles.merge")
+    return desc
+
+
 def preview_row(state: dict, instruction_cols, input_cols,
                 think_cols, output_cols, fixed_instruction: str = "") -> str:
     """用读取时暂存的首行，按当前映射渲染最终训练文本（与生成逻辑同一套代码）。"""
     if not state or not state.get("columns"):
-        raise ValueError("请先点「1. 读取列信息」。")
+        raise ValueError(t("dp.err.no_state"))
     row = state.get("first_row")
     if row is None:
-        raise ValueError("数据源是空的，没有可预览的行。")
+        raise ValueError(t("dp.err.empty_source"))
     mapping, fixed_ins = resolve_mapping(
         state["columns"], instruction_cols, input_cols, think_cols, output_cols,
         fixed_instruction)
     unified = format_unified_row(row, mapping, fixed_ins)
     if unified is None:
-        return "⚠️ 这一行的 output 回复列是空的，生成时会被丢弃。换个映射或检查数据。"
+        return t("dp.preview.empty_out")
     template, _ = build_template(bool(mapping["input"]))
     filled = drop_empty_sections(template.format(**unified))  # 单行预览不截断，完整显示
-    roles_desc = " + ".join(
-        f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
-    if mapping["think"]:
-        roles_desc += "（Response = think + output 拼接）"
-    return f"[单行预览] 映射: {roles_desc}\n" + "-" * 60 + f"\n{filled}"
+    roles_desc = _roles_desc(mapping)
+    return f"{t('dp.preview.head', roles=roles_desc)}\n" + "-" * 60 + f"\n{filled}"
 
 
 def generate_unified(state: dict, instruction_cols, input_cols,
@@ -294,7 +305,7 @@ def generate_unified(state: dict, instruction_cols, input_cols,
    （数据里没有对应列时用它，所有行共用；同时映射了列则做前缀拼在前面）.
     返回 (状态文本, 预览文本, 新数据集display_name)."""
     if not state or not state.get("columns"):
-        raise ValueError("请先点「1. 读取列信息」。")
+        raise ValueError(t("dp.err.no_state"))
     mapping, fixed_ins = resolve_mapping(
         state["columns"], instruction_cols, input_cols, think_cols, output_cols,
         fixed_instruction)
@@ -302,18 +313,18 @@ def generate_unified(state: dict, instruction_cols, input_cols,
     name = sanitize_name(output_name)
     cfg_path = DATASETS_CONFIG_DIR / f"{name}.json"
     if cfg_path.exists():
-        raise ValueError(f"数据集名 '{name}' 已存在（{cfg_path.name}），请换个名字。")
+        raise ValueError(t("dp.err.name_exists", name=name, file=cfg_path.name))
 
     from .config import load_datasets_config, find_by_name
     try:
         if find_by_name(load_datasets_config(), name) is not None:
-            raise ValueError(f"展示名 '{name}' 已被占用，请换个名字。")
+            raise ValueError(t("dp.err.display_used", name=name))
     except FileNotFoundError:
         pass  # 配置目录还没建，一会儿一起建
 
     if progress is not None:
         try:
-            progress(0.1, desc="加载原始数据...")
+            progress(0.1, desc=t("dp.prog.load"))
         except Exception:
             pass
     from .config import find_by_name as _find
@@ -328,7 +339,7 @@ def generate_unified(state: dict, instruction_cols, input_cols,
 
     if progress is not None:
         try:
-            progress(0.4, desc="映射列并清洗...")
+            progress(0.4, desc=t("dp.prog.map"))
         except Exception:
             pass
     rows: list[dict] = []
@@ -340,11 +351,11 @@ def generate_unified(state: dict, instruction_cols, input_cols,
             continue
         rows.append(unified)
     if not rows:
-        raise ValueError("有效行数为 0（所有行的 output 列都是空的），请检查列映射。")
+        raise ValueError(t("dp.err.no_rows"))
 
     if progress is not None:
         try:
-            progress(0.7, desc="落盘统一数据...")
+            progress(0.7, desc=t("dp.prog.save"))
         except Exception:
             pass
     out_dir = PROCESSED_ROOT / name
@@ -391,20 +402,17 @@ def generate_unified(state: dict, instruction_cols, input_cols,
 
     if progress is not None:
         try:
-            progress(1.0, desc="完成")
+            progress(1.0, desc=t("dp.prog.done"))
         except Exception:
             pass
-    status = (f"✅ 已生成统一训练数据 '{name}'：原始 {len(ds)} 行 → 保留 {len(rows)} 行"
-              + (f"（丢弃空回复 {dropped_empty} 行）" if dropped_empty else ""))
-    roles_desc = " + ".join(
-        f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
-    if mapping["think"]:
-        roles_desc += "（Response = think + output 拼接）"
-    prev_lines = [status, f"映射: {roles_desc}", "-" * 60]
+    status = (t("dp.status.done", name=name, total=len(ds), kept=len(rows))
+              + (t("dp.status.dropped", n=dropped_empty) if dropped_empty else ""))
+    roles_desc = _roles_desc(mapping)
+    prev_lines = [t("dp.mapping", roles=roles_desc), "-" * 60]
     for i, r in enumerate(rows[:2]):
         filled = drop_empty_sections(template.format(**r))
         if len(filled) > 1000:
-            filled = filled[:1000] + "\n…(截断)"
-        prev_lines.append(f"[统一后样本 {i+1}]\n{filled}\n" + "-" * 60)
-    prev_lines.append("现在可以去「训练」Tab 选中它开始训练（点刷新列表）。")
+            filled = filled[:1000] + t("dp.sample.trunc")
+        prev_lines.append(f"{t('dp.sample.head', i=i + 1)}\n{filled}\n" + "-" * 60)
+    prev_lines.append(t("dp.sample.tail"))
     return status, "\n".join(prev_lines), name

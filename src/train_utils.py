@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional
 
+from .i18n import t
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUTS_PARENT_DIR = PROJECT_ROOT / "outputs"
 LOGS_PARENT_DIR = PROJECT_ROOT / "logs"
@@ -36,9 +38,9 @@ def current_experiment() -> Optional[str]:
 
 def request_cancel() -> str:
     if not _state["running"]:
-        return "当前没有正在运行的训练。"
+        return t("tr.cancel_none")
     _cancel_event.set()
-    return f"已请求停止 '{_state.get('experiment')}'，将在当前 step 结束后停下并保存。"
+    return t("tr.cancel_req", exp=_state.get("experiment"))
 
 
 def _find_latest_checkpoint(output_dir: Path) -> Optional[str]:
@@ -170,14 +172,14 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
     """生成器：yield 状态文本，Gradio 侧保持响应 + 可取消."""
     exp = (req.experiment_name or "").strip().replace(" ", "_")
     if not exp:
-        yield "错误：实验名称不能为空。"
+        yield t("tr.no_exp_name")
         return
     if not req.selected_dataset_names:
-        yield "错误：必须选择至少一个数据集。"
+        yield t("tr.no_datasets")
         return
 
     if not _lock.acquire(blocking=False):
-        yield f"错误：已有训练 '{_state.get('experiment')}' 在运行，请先停止或等待完成。"
+        yield t("tr.running", exp=_state.get("experiment"))
         return
     _state.update(running=True, experiment=exp)
     _cancel_event.clear()
@@ -186,45 +188,41 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
         from .config import ensure_local_model
         from .dataset_utils import prepare_dataset, combine_datasets, apply_chat_template_if_needed
 
-        yield f"准备实验: {exp}"
+        yield t("tr.prep_exp", exp=exp)
         output_dir = OUTPUTS_PARENT_DIR / exp
         logging_dir = LOGS_PARENT_DIR / exp
         if output_dir.exists() and any(output_dir.iterdir()) and not req.resume_training:
-            yield (
-                f"错误：输出目录 '{output_dir}' 已存在且非空。为防覆盖请换实验名，"
-                f"或勾选“从断点继续训练”。"
-            )
+            yield t("tr.dir_exists", dir=output_dir)
             return
 
         models = load_models_config()
         datasets_cfg = load_datasets_config()
         model_cfg = find_by_name(models, req.selected_model_name)
         if model_cfg is None:
-            yield f"错误：找不到模型 '{req.selected_model_name}'。"
+            yield t("tr.no_model", name=req.selected_model_name)
             return
 
         if progress is not None:
             try:
-                progress(0.1, desc="加载并处理数据集...")
+                progress(0.1, desc=t("tr.loading_data"))
             except Exception:
                 pass
-        yield "加载并处理数据集中..."
+        yield t("tr.loading_data")
         all_ds = []
         for name in req.selected_dataset_names:
             cfg = find_by_name(datasets_cfg, name)
             if cfg is None:
-                yield f"警告：找不到数据集配置 '{name}'，已跳过。"
+                yield t("tr.warn_skip", name=name)
                 continue
             if not getattr(cfg, "processed", False):
-                yield (f"错误：数据集 '{name}' 未经过「数据处理」制成统一数据，"
-                       f"不能直接训练。请先去「数据处理」Tab 处理它。")
+                yield t("tr.unprocessed", name=name)
                 return
             all_ds.append(prepare_dataset(cfg, req.truncate_dataset, max_samples=req.max_samples))
         if not all_ds:
-            yield "错误：无法加载所选的数据集配置。"
+            yield t("tr.no_valid_ds")
             return
         combined = combine_datasets(all_ds)
-        yield f"数据集就绪：共 {len(combined)} 条（{len(all_ds)} 个数据集合并）。"
+        yield t("tr.ready", n=len(combined), k=len(all_ds))
         # 目录在这里才建：前面的校验失败直接返回，不留空目录污染 LoRA 列表
         output_dir.mkdir(parents=True, exist_ok=True)
         logging_dir.mkdir(parents=True, exist_ok=True)
@@ -240,14 +238,14 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
 
         if progress is not None:
             try:
-                progress(0.3, desc=f"初始化模型: {model_cfg.model_id}...")
+                progress(0.3, desc=t("tr.init_model", id=model_cfg.model_id))
             except Exception:
                 pass
-        yield f"初始化模型: {model_cfg.model_id} ..."
+        yield t("tr.init_model", id=model_cfg.model_id)
         try:
             model_path = ensure_local_model(model_cfg)
         except Exception as e:
-            yield f"❌ 模型地址解析失败: {e}"
+            yield t("tr.resolve_fail", err=e)
             return
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
         dtype = dtype_map.get(model_cfg.dtype) if model_cfg.dtype else None
@@ -283,34 +281,34 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             latest = _find_latest_checkpoint(output_dir)
             if latest:
                 resume_arg = latest
-                yield f"从断点继续训练... ({resume_arg})"
+                yield t("tr.resume_from", ckpt=resume_arg)
             else:
-                yield "勾了续训但没找到断点 checkpoint，从头开始训练..."
+                yield t("tr.resume_fresh")
         else:
-            yield "开始新的训练...（点“停止训练”可在当前 step 后安全中断）"
+            yield t("tr.start_new")
 
         if progress is not None:
             try:
-                progress(0.5, desc="训练中...")
+                progress(0.5, desc=t("tr.training"))
             except Exception:
                 pass
         trainer.train(resume_from_checkpoint=resume_arg)
 
         if _cancel_event.is_set():
             ckpt = _find_latest_checkpoint(output_dir)
-            yield f"已手动停止。断点已保存{(f': {ckpt}') if ckpt else ''}，可勾选续训继续。"
+            yield t("tr.stopped", ckpt=t("tr.stopped_ckpt", ckpt=ckpt) if ckpt else "")
             return
 
         if progress is not None:
             try:
-                progress(0.9, desc="保存 LoRA 适配器...")
+                progress(0.9, desc=t("tr.saving"))
             except Exception:
                 pass
         model.save_pretrained(str(output_dir))
         tokenizer.save_pretrained(str(output_dir))
-        yield f"训练完成！LoRA 已保存到 '{output_dir}'"
+        yield t("tr.done", dir=output_dir)
     except Exception:
-        yield "❌ 训练失败:\n" + traceback.format_exc(limit=8)
+        yield t("tr.failed", trace=traceback.format_exc(limit=8))
     finally:
         # 释放显存，同一进程后续可做推理
         try:

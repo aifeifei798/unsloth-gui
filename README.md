@@ -4,6 +4,8 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> [English](README.en.md)
+
 一个基于 Gradio + [Unsloth](https://github.com/unslothai/unsloth) 的图形化微调工具，
 专注**纯文本单卡 SFT**：模型管理、数据处理、训练、监控、对话，一个页面完成，
 全程不用写代码，不用手改配置文件。

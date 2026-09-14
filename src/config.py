@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .i18n import t
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -74,21 +76,21 @@ def _ensure_unique_display_names(items: list[dict], source: str) -> None:
     for it in items:
         name = it.get("display_name")
         if not name:
-            raise ValueError(f"{source} 中存在缺少 display_name 的配置: {it}")
+            raise ValueError(t("cfg.no_display", src=source, item=it))
         if name in seen:
-            raise ValueError(f"{source} 中 display_name 重复: '{name}'，请改名后重试。")
+            raise ValueError(t("cfg.dup", src=source, name=name))
         seen[name] = source
 
 
 def _model_from_dict(d: dict) -> ModelConfig:
     if "display_name" not in d or "model_id" not in d:
-        raise ValueError(f"模型配置缺字段（需要 display_name/model_id）: {d}")
+        raise ValueError(t("cfg.model_missing", d=d))
     known = {"display_name", "model_id", "load_in_4bit", "dtype", "max_seq_length",
              "chat_template", "source"}
     source = str(d.get("source", "auto") or "auto").lower()
     if source not in ("auto", "local", "huggingface", "modelscope"):
-        raise ValueError(f"模型 '{d.get('display_name')}' 的 source 非法: {source}，"
-                         f"只能是 auto/local/huggingface/modelscope。")
+        raise ValueError(t("cfg.model_bad_source", name=d.get("display_name"),
+                           source=source))
     return ModelConfig(
         display_name=d["display_name"],
         model_id=d["model_id"],
@@ -103,11 +105,11 @@ def _model_from_dict(d: dict) -> ModelConfig:
 
 def _dataset_from_dict(d: dict) -> DatasetConfig:
     if "display_name" not in d or "dataset_id" not in d:
-        raise ValueError(f"数据集配置缺字段（需要 display_name/dataset_id）: {d}")
+        raise ValueError(t("cfg.ds_missing", d=d))
     if not d.get("prompt_template"):
-        raise ValueError(f"数据集 '{d.get('display_name')}' 缺少 prompt_template。")
+        raise ValueError(t("cfg.ds_no_template", name=d.get("display_name")))
     if not isinstance(d.get("input_columns"), dict) or not d["input_columns"]:
-        raise ValueError(f"数据集 '{d.get('display_name')}' 的 input_columns 必须是非空 dict。")
+        raise ValueError(t("cfg.ds_bad_columns", name=d.get("display_name")))
     known = {"display_name", "dataset_id", "split", "is_local", "prompt_template",
              "input_columns", "chat_template", "recommended_params",
              "processed", "schema_version"}
@@ -131,13 +133,13 @@ def load_models_config(path: Path | str = PROJECT_ROOT / "models.json") -> list[
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     if not path.is_file():
-        raise FileNotFoundError(f"模型配置文件未找到: {path}")
+        raise FileNotFoundError(t("cfg.model_not_found", path=path))
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
     if isinstance(raw, dict):  # 兼容单对象写法
         raw = [raw]
     if not isinstance(raw, list) or not raw:
-        raise ValueError(f"{path} 必须是非空 list。")
+        raise ValueError(t("cfg.model_not_list", path=path))
     _ensure_unique_display_names(raw, str(path))
     return [_model_from_dict(d) for d in raw]
 
@@ -150,7 +152,7 @@ def load_datasets_config(path: Path | str = PROJECT_ROOT / "datasets_config") ->
     if path.is_dir():
         files = sorted(path.glob("*.json"))
         if not files:
-            raise FileNotFoundError(f"数据集配置目录为空: {path}")
+            raise FileNotFoundError(t("cfg.ds_empty_dir", path=path))
         for fp in files:
             with open(fp, "r", encoding="utf-8") as f:
                 d = json.load(f)
@@ -161,7 +163,7 @@ def load_datasets_config(path: Path | str = PROJECT_ROOT / "datasets_config") ->
             data = json.load(f)
         raws = data if isinstance(data, list) else [data]
     else:
-        raise FileNotFoundError(f"数据集配置未找到: {path}")
+        raise FileNotFoundError(t("cfg.ds_not_found", path=path))
     # 去掉内部字段后再校验重名
     for d in raws:
         d.pop("_source_file", None)
@@ -175,12 +177,12 @@ def safe_load_configs() -> tuple[list[ModelConfig], list[DatasetConfig], list[st
     try:
         models = load_models_config()
     except Exception as e:
-        warnings.append(f"模型配置加载失败: {e}")
+        warnings.append(t("warn.models", err=e))
         models = []
     try:
         datasets = load_datasets_config()
     except Exception as e:
-        warnings.append(f"数据集配置加载失败: {e}")
+        warnings.append(t("warn.datasets", err=e))
         datasets = []
     return models, datasets, warnings
 
@@ -192,8 +194,10 @@ def find_by_name(items: list, name: str) -> Optional[Any]:
     return None
 
 
-SOURCE_LABEL = {"local": "本地路径", "huggingface": "HuggingFace",
-                "modelscope": "魔搭 ModelScope", "auto": "自动判断"}
+def source_label(code: str) -> str:
+    """来源展示名（跟随界面语言），存文件永远用 code。"""
+    return {"local": t("model.src.local"), "huggingface": t("model.src.hf"),
+            "modelscope": t("model.src.ms")}.get((code or "").lower(), code or "")
 
 
 def model_source(cfg: ModelConfig) -> str:
@@ -221,18 +225,15 @@ def ensure_local_model(cfg: ModelConfig) -> str:
         try:
             from modelscope.hub.snapshot_download import snapshot_download
         except ImportError as e:
-            raise RuntimeError(
-                "要用魔搭模型请先安装: pip install modelscope") from e
+            raise RuntimeError(t("cfg.modelscope_need")) from e
         return snapshot_download(cfg.model_id.strip())
     if src == "local":
         p = cfg.resolved_model_id()
         if not Path(p).exists():
-            raise FileNotFoundError(
-                f"本地模型路径未找到: {cfg.model_id}（解析为 {p}）。"
-                f"请在「模型管理」里改成正确的路径。")
+            raise FileNotFoundError(t("cfg.model_local_missing", id=cfg.model_id, path=p))
         return p
     if not cfg.model_id or not cfg.model_id.strip():
-        raise ValueError(f"模型 '{cfg.display_name}' 的 ID 为空。")
+        raise ValueError(t("cfg.model_empty", name=cfg.display_name))
     return cfg.model_id.strip()
 
 
