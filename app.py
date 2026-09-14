@@ -296,7 +296,7 @@ with gr.Blocks() as demo:
                         gr.Markdown(
                             "四个角色都可**多选**，多列按顺序换行拼成一段。"
                             "列名乱没关系，把意思一样的列都勾上就行。"
-                            "Response 固定为 think + output 拼接（不单独设 Thinking 段）。"
+                            "Response 固定为 think + output 拼接（think 没带 <think> 标签会自动套上）。"
                         )
                         prep_ins_col = gr.Dropdown(
                             label="instruction 输入列（可多选）",

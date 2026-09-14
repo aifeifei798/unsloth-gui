@@ -229,13 +229,24 @@ def resolve_mapping(columns: list, instruction_cols, input_cols,
     return mapping, fixed_ins
 
 
+def _wrap_think(think: str) -> str:
+    """think 已带 <think></think> 就不动，没有就套上，保证 Response 里格式统一."""
+    if not think:
+        return ""
+    low = think.lower()
+    if "<think>" in low and "</think>" in low:
+        return think
+    return f"<think>\n{think}\n</think>"
+
+
 def format_unified_row(row: dict, mapping: dict, fixed_ins: str = "") -> Optional[dict]:
     """单行转统一格式（含 Response = think + output）。output 为空返回 None（该行丢弃）。"""
     out_raw = _merge(row, mapping["output"])
     if not out_raw:
         return None
     think_raw = _merge(row, mapping["think"])
-    out = f"{think_raw}\n{out_raw}" if think_raw else out_raw
+    think_tagged = _wrap_think(think_raw)
+    out = f"{think_tagged}\n{out_raw}" if think_tagged else out_raw
     ins_merged = _merge(row, mapping["instruction"])
     instruction = f"{fixed_ins}\n{ins_merged}" if fixed_ins and ins_merged else (fixed_ins or ins_merged)
     return {
