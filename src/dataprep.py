@@ -1,10 +1,12 @@
 """数据处理：把任意来源的数据集制成统一训练数据.
 
-统一 schema（训练只认这个）：
-    instruction: str  # 输入/指令（必填映射）
-    think: str        # 思维链（可选映射，没有就空字符串）
-    output: str       # 回复（必填映射，空回复的行会被丢弃并计数）
+统一 schema（训练只认这个，四个角色都可多选，多列按顺序换行拼接）：
+    instruction: str  # 指令/问题（至少映射 1 列）
+    input: str        # 补充输入/上下文（可选）
+    think: str        # 思维链（可选）
+    output: str       # 回复（至少映射 1 列，空回复的行会被丢弃并计数）
 
+模板按实际映射动态组装（没映射 input/think 就没有对应段落，不浪费 token）。
 产物（local_data/processed/<name>/）：
     data.jsonl        # 人可读的统一数据
     hf_dataset/       # arrow 落盘，训练时 load_from_disk 秒载
@@ -26,16 +28,26 @@ PROCESSED_ROOT = PROJECT_ROOT / "local_data" / "processed"
 UPLOAD_ROOT = PROJECT_ROOT / "local_data" / "uploads"
 DATASETS_CONFIG_DIR = PROJECT_ROOT / "datasets_config"
 
-NO_THINK = "(无 / 不映射)"
+SCHEMA_VERSION = 2
 
-UNIFIED_WITH_THINK = (
-    "### Instruction:\n{instruction}\n\n"
-    "### Thinking:\n{think}\n\n"
-    "### Response:\n{output}"
-)
-UNIFIED_NO_THINK = "### Instruction:\n{instruction}\n\n### Response:\n{output}"
+ROLES = ("instruction", "input", "think", "output")
+ROLE_LABEL = {"instruction": "instruction 输入", "input": "input 上下文",
+              "think": "think 思维链", "output": "output 回复"}
 
-SCHEMA_VERSION = 1
+
+def build_template(use_input: bool, use_think: bool) -> tuple[str, dict]:
+    """按实际映射组装模板与 input_columns."""
+    parts = ["### Instruction:\n{instruction}"]
+    columns = {"instruction": "instruction"}
+    if use_input:
+        parts.append("### Input:\n{input}")
+        columns["input"] = "input"
+    if use_think:
+        parts.append("### Thinking:\n{think}")
+        columns["think"] = "think"
+    parts.append("### Response:\n{output}")
+    columns["output"] = "output"
+    return "\n\n".join(parts), columns
 
 
 def sanitize_name(name: str) -> str:
@@ -176,24 +188,48 @@ def _cell(v) -> str:
     return str(v).strip()
 
 
-def generate_unified(state: dict, instruction_col: str, think_col: str,
-                     output_col: str, output_name: str,
+def _as_list(v) -> list:
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v] if v else []
+    return [c for c in v if c]
+
+
+def _merge(row: dict, cols: list) -> str:
+    """多列按顺序换行拼接，跳过空值."""
+    return "\n".join(_cell(row.get(c)) for c in cols if _cell(row.get(c)))
+
+
+def generate_unified(state: dict, instruction_cols, input_cols,
+                     think_cols, output_cols, output_name: str,
                      progress=None) -> tuple[str, str, str]:
-    """生成统一数据。返回 (状态文本, 预览文本, 新数据集display_name)."""
+    """生成统一数据。四个角色都可多选。返回 (状态文本, 预览文本, 新数据集display_name)."""
     if not state or not state.get("columns"):
         raise ValueError("请先点「1. 读取列信息」。")
     cols = state["columns"]
-    if not instruction_col or instruction_col not in cols:
-        raise ValueError("请选择 instruction 输入列。")
-    if not output_col or output_col not in cols:
-        raise ValueError("请选择 output 回复列。")
-    if instruction_col == output_col:
-        raise ValueError("instruction 列和 output 列不能是同一列。")
-    use_think = bool(think_col and think_col != NO_THINK)
-    if use_think and think_col not in cols:
-        raise ValueError(f"think 列 '{think_col}' 不存在。")
-    if use_think and think_col in (instruction_col, output_col):
-        raise ValueError("think 列不能和 instruction/output 列相同。")
+    mapping = {
+        "instruction": _as_list(instruction_cols),
+        "input": _as_list(input_cols),
+        "think": _as_list(think_cols),
+        "output": _as_list(output_cols),
+    }
+    for role, selected in mapping.items():
+        for c in selected:
+            if c not in cols:
+                raise ValueError(f"{ROLE_LABEL[role]}里有不存在的列 '{c}'，实际列: {cols}。")
+    if not mapping["instruction"]:
+        raise ValueError("请至少选择 1 列作为 instruction 输入。")
+    if not mapping["output"]:
+        raise ValueError("请至少选择 1 列作为 output 回复。")
+    seen: dict[str, str] = {}
+    for role, selected in mapping.items():
+        for c in selected:
+            if c in seen:
+                raise ValueError(
+                    f"列 '{c}' 同时被映射为{ROLE_LABEL[seen[c]]}和{ROLE_LABEL[role]}，"
+                    f"一列只能担任一个角色。")
+            seen[c] = role
 
     name = sanitize_name(output_name)
     cfg_path = DATASETS_CONFIG_DIR / f"{name}.json"
@@ -230,13 +266,14 @@ def generate_unified(state: dict, instruction_col: str, think_col: str,
     rows: list[dict] = []
     dropped_empty = 0
     for row in ds:
-        out = _cell(row.get(output_col))
+        out = _merge(row, mapping["output"])
         if not out:
             dropped_empty += 1
             continue
         rows.append({
-            "instruction": _cell(row.get(instruction_col)),
-            "think": _cell(row.get(think_col)) if use_think else "",
+            "instruction": _merge(row, mapping["instruction"]),
+            "input": _merge(row, mapping["input"]),
+            "think": _merge(row, mapping["think"]),
             "output": out,
         })
     if not rows:
@@ -264,9 +301,7 @@ def generate_unified(state: dict, instruction_col: str, think_col: str,
         "name": name,
         "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": {k: state.get(k) for k in ("kind", "hf_id", "split", "existing_name")},
-        "mapping": {"instruction": instruction_col,
-                    "think": think_col if use_think else None,
-                    "output": output_col},
+        "mapping": mapping,
         "rows_total": len(ds),
         "rows_kept": len(rows),
         "rows_dropped_empty_output": dropped_empty,
@@ -275,10 +310,9 @@ def generate_unified(state: dict, instruction_col: str, think_col: str,
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
-    template = UNIFIED_WITH_THINK if use_think else UNIFIED_NO_THINK
-    input_columns = {"instruction": "instruction", "output": "output"}
-    if use_think:
-        input_columns = {"instruction": "instruction", "think": "think", "output": "output"}
+    use_input = bool(mapping["input"])
+    use_think = bool(mapping["think"])
+    template, input_columns = build_template(use_input, use_think)
     cfg = {
         "display_name": name,
         "dataset_id": f"./local_data/processed/{name}/hf_dataset",
@@ -299,7 +333,9 @@ def generate_unified(state: dict, instruction_col: str, think_col: str,
             pass
     status = (f"✅ 已生成统一训练数据 '{name}'：原始 {len(ds)} 行 → 保留 {len(rows)} 行"
               + (f"（丢弃空回复 {dropped_empty} 行）" if dropped_empty else ""))
-    prev_lines = [status, f"模板: {'含 Thinking' if use_think else '无 Thinking'}", "-" * 60]
+    roles_desc = " + ".join(
+        f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
+    prev_lines = [status, f"映射: {roles_desc}", "-" * 60]
     for i, r in enumerate(rows[:2]):
         filled = template.format(**r)
         if len(filled) > 1000:

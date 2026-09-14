@@ -19,7 +19,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
-from src.dataprep import NO_THINK, generate_unified, inspect_text, persist_upload
+from src.dataprep import generate_unified, inspect_text, persist_upload
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
     list_trained_loras,
@@ -191,13 +191,14 @@ def _prep_source_ui(kind):
 def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
                   progress=gr.Progress(track_tqdm=True)):
     from src.config import find_by_name as _find
+    _empty = (gr.update(), gr.update(), gr.update(), gr.update())
     if kind == "上传文件":
         if not upload_path:
-            return "❌ 请先上传文件。", {}, gr.update(), gr.update(), gr.update()
+            return "❌ 请先上传文件。", {}, *_empty
         try:
             local_path = persist_upload(upload_path)
         except Exception as e:
-            return f"❌ 上传文件保存失败: {e}", {}, gr.update(), gr.update(), gr.update()
+            return f"❌ 上传文件保存失败: {e}", {}, *_empty
         dkind, existing = "upload", None
     elif kind == "HuggingFace":
         dkind, local_path, existing = "hf", "", None
@@ -205,25 +206,26 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
         dkind, local_path = "existing", ""
         existing = _find(DATASETS, existing_name)
         if existing is None:
-            return f"❌ 找不到配置 '{existing_name}'。", {}, gr.update(), gr.update(), gr.update()
+            return f"❌ 找不到配置 '{existing_name}'。", {}, *_empty
     try:
         text, state = inspect_text(dkind, hf_id or "", hf_split or "train", local_path, existing)
     except Exception as e:
-        return f"❌ 读取失败: {e}", {}, gr.update(), gr.update(), gr.update()
+        return f"❌ 读取失败: {e}", {}, *_empty
     cols = state["columns"]
     return (
         text, state,
-        gr.update(choices=cols, value=cols[0] if cols else None),
-        gr.update(choices=[NO_THINK] + cols, value=NO_THINK),
-        gr.update(choices=cols, value=cols[-1] if cols else None),
+        gr.update(choices=cols, value=[cols[0]] if cols else []),
+        gr.update(choices=cols, value=[]),
+        gr.update(choices=cols, value=[]),
+        gr.update(choices=cols, value=[cols[-1]] if cols else []),
     )
 
 
-def _prep_generate(state, ins_col, think_col, out_col, name,
+def _prep_generate(state, ins_cols, input_cols, think_cols, out_cols, name,
                    progress=gr.Progress(track_tqdm=True)):
     try:
         status, preview, new_name = generate_unified(
-            state or {}, ins_col, think_col, out_col, name, progress=progress)
+            state or {}, ins_cols, input_cols, think_cols, out_cols, name, progress=progress)
     except Exception as e:
         return f"❌ 生成失败: {e}", "", gr.update(), gr.update()
     warns = _reload_datasets()
@@ -255,7 +257,7 @@ with gr.Blocks() as demo:
             gr.Markdown("## 🧹 把任意数据制成统一训练数据")
             gr.Markdown(
                 "**步骤1**: 选来源并「读取列信息」（只取 1 行预览，秒开）。"
-                "**步骤2**: 映射哪列是输入 / 思维链 / 回复。"
+                "**步骤2**: 映射哪几列是输入 / 上下文 / 思维链 / 回复（都可多选）。"
                 "**步骤3**: 「生成统一训练数据」（这时才全量拉取）。只有这里制成的数据才能拿去训练。"
             )
             with gr.Row():
@@ -282,12 +284,26 @@ with gr.Blocks() as demo:
                         )
                         prep_inspect_btn = gr.Button("1. 读取列信息", variant="secondary")
                     with gr.Accordion("2. 列映射与生成", open=True):
-                        prep_ins_col = gr.Dropdown(label="instruction 输入列（必填）", choices=[])
-                        prep_think_col = gr.Dropdown(
-                            label="think 思维链列（可选，没有就选“无”）",
-                            choices=[NO_THINK], value=NO_THINK,
+                        gr.Markdown(
+                            "四个角色都可**多选**，多列按顺序换行拼成一段。"
+                            "列名乱没关系，把意思一样的列都勾上就行。"
                         )
-                        prep_out_col = gr.Dropdown(label="output 回复列（必填）", choices=[])
+                        prep_ins_col = gr.Dropdown(
+                            label="instruction 输入列（必填，可多选）",
+                            choices=[], multiselect=True,
+                        )
+                        prep_input_col = gr.Dropdown(
+                            label="input 上下文列（可选，可多选）",
+                            choices=[], multiselect=True,
+                        )
+                        prep_think_col = gr.Dropdown(
+                            label="think 思维链列（可选，可多选）",
+                            choices=[], multiselect=True,
+                        )
+                        prep_out_col = gr.Dropdown(
+                            label="output 回复列（必填，可多选）",
+                            choices=[], multiselect=True,
+                        )
                         prep_name = gr.Textbox(
                             label="统一数据名称（必填，将出现在训练列表）",
                             placeholder="如 wukong_v1",
@@ -414,11 +430,12 @@ with gr.Blocks() as demo:
     prep_inspect_btn.click(
         fn=_prep_inspect,
         inputs=[prep_source_radio, prep_upload, prep_hf_id, prep_hf_split, prep_existing],
-        outputs=[prep_inspect_output, prep_state, prep_ins_col, prep_think_col, prep_out_col],
+        outputs=[prep_inspect_output, prep_state, prep_ins_col, prep_input_col,
+                 prep_think_col, prep_out_col],
     )
     prep_generate_btn.click(
         fn=_prep_generate,
-        inputs=[prep_state, prep_ins_col, prep_think_col, prep_out_col, prep_name],
+        inputs=[prep_state, prep_ins_col, prep_input_col, prep_think_col, prep_out_col, prep_name],
         outputs=[prep_status, prep_preview, dataset_dropdown, prep_existing],
     )
     refresh_datasets_btn.click(

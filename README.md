@@ -103,10 +103,11 @@
 
 训练只认处理过的统一数据。流程：打开「🧹 数据处理」Tab →
 选来源（上传文件 / HuggingFace ID / 已有配置）→「读取列信息」→
-映射 `instruction` 输入列、`think` 思维链列（可选）、`output` 回复列 →
-「生成统一训练数据」。生成后去「训练」Tab 点「🔄 刷新数据集列表」即可选中。
+映射 `instruction` 输入列、`input` 上下文列（可选）、`think` 思维链列（可选）、
+`output` 回复列 →「生成统一训练数据」。生成后去「训练」Tab 点「🔄 刷新数据集列表」即可选中。
 
-统一格式为 `instruction / think / output` 三列，无 think 的数据 think 留空；
+统一格式为 `instruction / input / think / output` 四列，每个角色都可多选，
+多列按顺序换行拼成一段；没映射 input/think 就没有对应段落；
 空回复的行会自动丢弃并计数。产物在 `local_data/processed/<名称>/`
 （`data.jsonl` + `hf_dataset/` + `manifest.json`），配置自动写入
 `datasets_config/`，不用手写 JSON。

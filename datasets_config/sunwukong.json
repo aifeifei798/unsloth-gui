@@ -3,7 +3,7 @@
   "dataset_id": "./local_data/sunwukong_style_100.jsonl",
   "is_local": true,
   "processed": true,
-  "schema_version": 1,
+  "schema_version": 2,
   "prompt_template": "### Instruction:\n{instruction}\n\n### Response:\n{output}",
   "input_columns": {
     "instruction": "instruction",
