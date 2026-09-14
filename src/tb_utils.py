@@ -4,7 +4,6 @@ from __future__ import annotations
 import atexit
 import socket
 import subprocess
-from pathlib import Path
 from typing import Optional
 
 from .config import PROJECT_ROOT

@@ -14,10 +14,21 @@ _mgr_lock = threading.Lock()
 _mgr = {"model": None, "tokenizer": None, "base": None, "lora": None}
 
 
+def _looks_like_lora(d: Path) -> bool:
+    """只有含 adapter 产物的目录才算 LoRA，失败残留的空目录不列出来."""
+    try:
+        if (d / "adapter_config.json").is_file():
+            return True
+        return any(f.suffix == ".safetensors" for f in d.iterdir() if f.is_file())
+    except Exception:
+        return False
+
+
 def list_trained_loras() -> list[str]:
     if not OUTPUTS_PARENT_DIR.exists():
         return []
-    return sorted([d.name for d in OUTPUTS_PARENT_DIR.iterdir() if d.is_dir()])
+    return sorted([d.name for d in OUTPUTS_PARENT_DIR.iterdir()
+                   if d.is_dir() and _looks_like_lora(d)])
 
 
 def loaded_info() -> str:

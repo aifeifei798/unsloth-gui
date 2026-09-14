@@ -118,7 +118,11 @@ def peek_source(kind: str, hf_id: str = "", split: str = "train",
                 ) -> tuple[list, Optional[dict], Optional[int], bool]:
     """只取 1 行做映射预览：远端走 streaming 秒开（不下载全量），本地直接读。
     返回 (列名, 首行|None, 总行数|None, 是否流式)。全量数据等点生成时再拉取。"""
-    split = (split or "train").strip() or "train"
+    if kind == "existing" and existing is not None:
+        # 已有配置看它自己的切分，和生成侧保持一致
+        split = (existing.split or "train").strip() or "train"
+    else:
+        split = (split or "train").strip() or "train"
     remote = kind == "hf" or (
         kind == "existing" and existing is not None
         and not Path(existing.resolved_dataset_id()).exists()
@@ -156,10 +160,12 @@ def persist_upload(src_path: str) -> str:
 def inspect_text(kind: str, hf_id: str = "", split: str = "train",
                  local_path: str = "", existing: Optional[DatasetConfig] = None) -> tuple[str, dict]:
     """只取 1 行预览列信息（远端流式秒开）；全量数据等生成时再拉取。"""
+    if kind == "existing" and existing is not None:
+        split = (existing.split or "train").strip() or "train"
     cols, row, n_rows, streamed = peek_source(kind, hf_id, split, local_path, existing)
     if not cols:
         raise ValueError("未能读到任何列，请检查来源与切分名。")
-    count_line = (f"总行数: 未知（流式预览，点生成时全量拉取）" if streamed
+    count_line = ("总行数: 未知（流式预览，点生成时全量拉取）" if streamed
                   else f"总行数: {n_rows}")
     lines = [
         count_line,

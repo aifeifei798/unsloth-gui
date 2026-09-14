@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from .config import PROJECT_ROOT, DatasetConfig, find_by_name, load_datasets_config
+from .config import DatasetConfig, find_by_name, load_datasets_config
 from .dataprep import DATASETS_CONFIG_DIR, PROCESSED_ROOT, sanitize_name
 
 

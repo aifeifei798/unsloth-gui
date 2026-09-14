@@ -20,6 +20,7 @@ import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
 from src.config import load_models_config, save_models_config, ModelConfig, model_source
+from src.config import SOURCE_LABEL
 from src.data_mgmt import delete_entry, detail_text, list_entries, rename_entry, sample_text
 from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
@@ -48,7 +49,7 @@ ALL_DATASET_NAMES = [d.display_name for d in DATASETS]
 
 def _reload_datasets():
     """重读配置并刷新全局列表，返回告警信息."""
-    global DATASETS, DATASET_DISPLAY_NAMES, ALL_DATASET_NAMES
+    global DATASET_DISPLAY_NAMES, ALL_DATASET_NAMES
     _, fresh, warns = safe_load_configs()
     DATASETS[:] = fresh
     DATASET_DISPLAY_NAMES = _processed_names(fresh)
@@ -63,7 +64,7 @@ _MODEL_SOURCE_MAP = {"本地路径": "local", "HuggingFace": "huggingface",
 
 def _reload_models():
     """重读 models.json 并刷新全局列表，返回告警信息."""
-    global MODELS, MODEL_DISPLAY_NAMES
+    global MODEL_DISPLAY_NAMES
     try:
         MODELS[:] = load_models_config()
     except Exception as e:
@@ -73,7 +74,6 @@ def _reload_models():
 
 
 def _model_rows():
-    from src.config import model_source, SOURCE_LABEL
     rows = []
     for m in MODELS:
         src = model_source(m)
@@ -354,7 +354,7 @@ HERO_HTML = """
 <div id="app-hero">
   <h1>🚀 Unsloth GUI Trainer & Playground</h1>
   <p>模型管理、数据处理、训练、监控、对话，一页完成</p>
-  <span class="ver">v4.0 · Gradio 6 · Unsloth Core</span>
+  <span class="ver">v0.1.0 · Gradio 6 · Unsloth Core</span>
 </div>
 """
 
@@ -414,26 +414,27 @@ def _train_wrapper(experiment_name, resume_training, truncate_dataset, max_sampl
                    selected_model_name, selected_dataset_names,
                    lora_r, lora_alpha, batch_size, grad_accum, lr, max_seq_length,
                    progress=gr.Progress(track_tqdm=True)):
-    req = TrainRequest(
-        experiment_name=experiment_name, resume_training=bool(resume_training),
-        truncate_dataset=bool(truncate_dataset), max_samples=int(max_samples),
-        training_mode=training_mode, num_epochs=float(num_epochs),
-        max_steps=int(max_steps), save_steps=int(save_steps),
-        selected_model_name=selected_model_name,
-        selected_dataset_names=list(selected_dataset_names or []),
-        lora_r=int(lora_r), lora_alpha=int(lora_alpha),
-        batch_size=int(batch_size), grad_accum=int(grad_accum),
-        lr=float(lr), max_seq_length=int(max_seq_length),
-    )
+    try:
+        req = TrainRequest(
+            experiment_name=experiment_name, resume_training=bool(resume_training),
+            truncate_dataset=bool(truncate_dataset), max_samples=int(max_samples or 200),
+            training_mode=training_mode, num_epochs=float(num_epochs),
+            max_steps=int(max_steps or 100), save_steps=int(save_steps or 50),
+            selected_model_name=selected_model_name,
+            selected_dataset_names=list(selected_dataset_names or []),
+            lora_r=int(lora_r), lora_alpha=int(lora_alpha),
+            batch_size=int(batch_size), grad_accum=int(grad_accum),
+            lr=float(lr), max_seq_length=int(max_seq_length),
+        )
+    except (TypeError, ValueError) as e:
+        yield f"❌ 参数格式错误（数字框被清空了？）: {e}", gr.skip()
+        return
     last = ""
     for msg in run_training(req, progress=progress):
         last = msg
-        yield last
-    # 训练结束刷新 LoRA 下拉
-    try:
-        yield last
-    except Exception:
-        pass
+        yield last, gr.skip()
+    # 训练结束刷新测试 Tab 的 LoRA 下拉
+    yield last, gr.update(choices=list_trained_loras())
 
 
 def _stop_training():
@@ -907,6 +908,11 @@ with gr.Blocks() as demo:
                 lora_r_slider, lora_alpha_slider, learning_rate_slider],
         outputs=[training_mode_selector, num_epochs_slider, lora_r_slider,
                  lora_alpha_slider, learning_rate_slider],
+    ).then(
+        # 推荐参数可能切换了训练模式，联动滑块显隐
+        fn=_update_training_mode_ui,
+        inputs=[training_mode_selector],
+        outputs=[num_epochs_slider, max_steps_slider, save_steps_input],
     )
     preview_btn.click(
         fn=lambda sel: _on_dataset_change(sel or [])[0],
@@ -919,7 +925,8 @@ with gr.Blocks() as demo:
         model_dropdown, dataset_dropdown, lora_r_slider, lora_alpha_slider,
         batch_size_slider, grad_accum_slider, learning_rate_slider, max_seq_len_slider,
     ]
-    start_button.click(fn=_train_wrapper, inputs=train_inputs, outputs=[status_output])
+    start_button.click(fn=_train_wrapper, inputs=train_inputs,
+                       outputs=[status_output, lora_selector_dropdown])
     stop_button.click(fn=_stop_training, outputs=[status_output])
 
     load_model_button.click(

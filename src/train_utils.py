@@ -195,8 +195,6 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
                 f"或勾选“从断点继续训练”。"
             )
             return
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logging_dir.mkdir(parents=True, exist_ok=True)
 
         models = load_models_config()
         datasets_cfg = load_datasets_config()
@@ -227,6 +225,9 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             return
         combined = combine_datasets(all_ds)
         yield f"数据集就绪：共 {len(combined)} 条（{len(all_ds)} 个数据集合并）。"
+        # 目录在这里才建：前面的校验失败直接返回，不留空目录污染 LoRA 列表
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logging_dir.mkdir(parents=True, exist_ok=True)
 
         # 延迟导入重型依赖，UI 无 GPU 也能先打开；
         # torch 只在真正要碰模型时才导入，前面的数据校验不需要它
@@ -280,8 +281,11 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
         resume_arg = None
         if req.resume_training:
             latest = _find_latest_checkpoint(output_dir)
-            resume_arg = latest or True
-            yield f"从断点继续训练... ({resume_arg})"
+            if latest:
+                resume_arg = latest
+                yield f"从断点继续训练... ({resume_arg})"
+            else:
+                yield "勾了续训但没找到断点 checkpoint，从头开始训练..."
         else:
             yield "开始新的训练...（点“停止训练”可在当前 step 后安全中断）"
 
