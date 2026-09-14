@@ -218,6 +218,10 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             if cfg is None:
                 yield f"警告：找不到数据集配置 '{name}'，已跳过。"
                 continue
+            if not getattr(cfg, "processed", False):
+                yield (f"错误：数据集 '{name}' 未经过「数据处理」制成统一数据，"
+                       f"不能直接训练。请先去「数据处理」Tab 处理它。")
+                return
             all_ds.append(prepare_dataset(cfg, req.truncate_dataset, max_samples=req.max_samples))
         if not all_ds:
             yield "错误：无法加载所选的数据集配置。"

@@ -49,6 +49,9 @@ class DatasetConfig:
     input_columns: dict = field(default_factory=dict)
     chat_template: Optional[str] = None
     recommended_params: dict = field(default_factory=dict)
+    # 数据处理 Tab 制成的统一数据才带此标记；训练只认 processed=True 的
+    processed: bool = False
+    schema_version: int = 0
     extra: dict = field(default_factory=dict)
 
     def resolved_dataset_id(self) -> str:
@@ -99,7 +102,8 @@ def _dataset_from_dict(d: dict) -> DatasetConfig:
     if not isinstance(d.get("input_columns"), dict) or not d["input_columns"]:
         raise ValueError(f"数据集 '{d.get('display_name')}' 的 input_columns 必须是非空 dict。")
     known = {"display_name", "dataset_id", "split", "is_local", "prompt_template",
-             "input_columns", "chat_template", "recommended_params"}
+             "input_columns", "chat_template", "recommended_params",
+             "processed", "schema_version"}
     return DatasetConfig(
         display_name=d["display_name"],
         dataset_id=d["dataset_id"],
@@ -109,6 +113,8 @@ def _dataset_from_dict(d: dict) -> DatasetConfig:
         input_columns=dict(d["input_columns"]),
         chat_template=d.get("chat_template"),
         recommended_params=dict(d.get("recommended_params") or {}),
+        processed=bool(d.get("processed", False)),
+        schema_version=int(d.get("schema_version", 0)),
         extra={k: v for k, v in d.items() if k not in known and k != "use_full_dataset"},
     )
 

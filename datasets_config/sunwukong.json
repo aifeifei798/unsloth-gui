@@ -2,7 +2,9 @@
   "display_name": "孙悟空角色扮演 (示例)",
   "dataset_id": "./local_data/sunwukong_style_100.jsonl",
   "is_local": true,
-  "prompt_template": "### User:\n{instruction}\n\n### Assistant:\n{output}",
+  "processed": true,
+  "schema_version": 1,
+  "prompt_template": "### Instruction:\n{instruction}\n\n### Response:\n{output}",
   "input_columns": {
     "instruction": "instruction",
     "output": "output"

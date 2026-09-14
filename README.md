@@ -99,9 +99,17 @@
 ]
 ```
 
-#### b) 配置数据集
+#### b) 准备数据集（必须走「🧹 数据处理」Tab）
 
-在 `datasets_config/` 目录下，为每个您想使用的数据集创建一个 `.json` 配置文件。
+训练只认处理过的统一数据。流程：打开「🧹 数据处理」Tab →
+选来源（上传文件 / HuggingFace ID / 已有配置）→「读取列信息」→
+映射 `instruction` 输入列、`think` 思维链列（可选）、`output` 回复列 →
+「生成统一训练数据」。生成后去「训练」Tab 点「🔄 刷新数据集列表」即可选中。
+
+统一格式为 `instruction / think / output` 三列，无 think 的数据 think 留空；
+空回复的行会自动丢弃并计数。产物在 `local_data/processed/<名称>/`
+（`data.jsonl` + `hf_dataset/` + `manifest.json`），配置自动写入
+`datasets_config/`，不用手写 JSON。
 
 **示例 `datasets_config/alpaca_cleaned.json`:**
 

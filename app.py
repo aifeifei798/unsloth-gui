@@ -19,6 +19,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
+from src.dataprep import NO_THINK, generate_unified, inspect_text, persist_upload
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
     list_trained_loras,
@@ -32,7 +33,25 @@ from src.train_utils import TrainRequest, current_experiment, is_training, reque
 
 MODELS, DATASETS, CONFIG_WARNINGS = safe_load_configs()
 MODEL_DISPLAY_NAMES = [m.display_name for m in MODELS]
-DATASET_DISPLAY_NAMES = [d.display_name for d in DATASETS]
+
+
+def _processed_names(items):
+    return [d.display_name for d in items if getattr(d, "processed", False)]
+
+
+# 训练 Tab 只认「数据处理」制成的统一数据；全部列表留给处理 Tab 做迁移来源
+DATASET_DISPLAY_NAMES = _processed_names(DATASETS)
+ALL_DATASET_NAMES = [d.display_name for d in DATASETS]
+
+
+def _reload_datasets():
+    """重读配置并刷新全局列表，返回告警信息."""
+    global DATASETS, DATASET_DISPLAY_NAMES, ALL_DATASET_NAMES
+    _, fresh, warns = safe_load_configs()
+    DATASETS[:] = fresh
+    DATASET_DISPLAY_NAMES = _processed_names(fresh)
+    ALL_DATASET_NAMES = [d.display_name for d in fresh]
+    return warns
 
 # --- 纯视觉主题（不影响任何功能逻辑） ---
 APP_THEME = gr.themes.Soft(
@@ -156,6 +175,74 @@ def _load_model_wrapper(base, lora, progress=gr.Progress(track_tqdm=True)):
     return f"{msg}\n{loaded_info()}", gr.update(choices=list_trained_loras())
 
 
+# --- 数据处理 Tab 逻辑 ---
+def _prep_source_ui(kind):
+    is_upload = kind == "上传文件"
+    is_hf = kind == "HuggingFace"
+    is_ex = kind == "已有配置"
+    return (
+        gr.update(visible=is_upload),
+        gr.update(visible=is_hf),
+        gr.update(visible=is_hf),
+        gr.update(visible=is_ex),
+    )
+
+
+def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
+                  progress=gr.Progress(track_tqdm=True)):
+    from src.config import find_by_name as _find
+    if kind == "上传文件":
+        if not upload_path:
+            return "❌ 请先上传文件。", {}, gr.update(), gr.update(), gr.update()
+        try:
+            local_path = persist_upload(upload_path)
+        except Exception as e:
+            return f"❌ 上传文件保存失败: {e}", {}, gr.update(), gr.update(), gr.update()
+        dkind, existing = "upload", None
+    elif kind == "HuggingFace":
+        dkind, local_path, existing = "hf", "", None
+    else:
+        dkind, local_path = "existing", ""
+        existing = _find(DATASETS, existing_name)
+        if existing is None:
+            return f"❌ 找不到配置 '{existing_name}'。", {}, gr.update(), gr.update(), gr.update()
+    try:
+        text, state = inspect_text(dkind, hf_id or "", hf_split or "train", local_path, existing)
+    except Exception as e:
+        return f"❌ 读取失败: {e}", {}, gr.update(), gr.update(), gr.update()
+    cols = state["columns"]
+    return (
+        text, state,
+        gr.update(choices=cols, value=cols[0] if cols else None),
+        gr.update(choices=[NO_THINK] + cols, value=NO_THINK),
+        gr.update(choices=cols, value=cols[-1] if cols else None),
+    )
+
+
+def _prep_generate(state, ins_col, think_col, out_col, name,
+                   progress=gr.Progress(track_tqdm=True)):
+    try:
+        status, preview, new_name = generate_unified(
+            state or {}, ins_col, think_col, out_col, name, progress=progress)
+    except Exception as e:
+        return f"❌ 生成失败: {e}", "", gr.update(), gr.update()
+    warns = _reload_datasets()
+    msg = status + (f"\n⚠️ 配置告警: {warns}" if warns else "")
+    return (
+        msg, preview,
+        gr.update(choices=DATASET_DISPLAY_NAMES, value=[new_name]),
+        gr.update(choices=ALL_DATASET_NAMES),
+    )
+
+
+def _refresh_train_datasets():
+    warns = _reload_datasets()
+    msg = (f"已刷新：可用统一数据 {len(DATASET_DISPLAY_NAMES)} 个"
+           + (f"\n⚠️ {warns}" if warns else "")
+           + ("\n还没有？去「数据处理」Tab 制一份。" if not DATASET_DISPLAY_NAMES else ""))
+    return msg, gr.update(choices=DATASET_DISPLAY_NAMES)
+
+
 with gr.Blocks() as demo:
     gr.HTML(HERO_HTML)
     if CONFIG_WARNINGS:
@@ -164,6 +251,57 @@ with gr.Blocks() as demo:
         gr.Markdown(f"⚠️ 检测到有训练正在运行: {current_experiment()}")
 
     with gr.Tabs():
+        with gr.Tab("🧹 数据处理 (Data Prep)"):
+            gr.Markdown("## 🧹 把任意数据制成统一训练数据")
+            gr.Markdown(
+                "**步骤1**: 选来源并「读取列信息」。**步骤2**: 映射哪列是输入 / 思维链 / 回复。"
+                "**步骤3**: 「生成统一训练数据」。只有这里制成的数据才能拿去训练。"
+            )
+            with gr.Row():
+                with gr.Column(scale=1):
+                    with gr.Accordion("1. 选择来源", open=True):
+                        prep_source_radio = gr.Radio(
+                            ["上传文件", "HuggingFace", "已有配置"],
+                            value="上传文件", label="数据来源",
+                        )
+                        prep_upload = gr.File(
+                            label="上传文件 (.jsonl / .json / .csv / .parquet / .txt)",
+                            file_types=[".jsonl", ".json", ".csv", ".parquet", ".txt"],
+                            type="filepath", visible=True,
+                        )
+                        prep_hf_id = gr.Textbox(
+                            label="HF 数据集 ID", value="yahma/alpaca-cleaned", visible=False,
+                        )
+                        prep_hf_split = gr.Textbox(label="切分 (split)", value="train", visible=False)
+                        prep_existing = gr.Dropdown(
+                            label="已有配置（可拿旧配置重新制一遍）",
+                            choices=ALL_DATASET_NAMES,
+                            value=ALL_DATASET_NAMES[0] if ALL_DATASET_NAMES else None,
+                            visible=False,
+                        )
+                        prep_inspect_btn = gr.Button("1. 读取列信息", variant="secondary")
+                    with gr.Accordion("2. 列映射与生成", open=True):
+                        prep_ins_col = gr.Dropdown(label="instruction 输入列（必填）", choices=[])
+                        prep_think_col = gr.Dropdown(
+                            label="think 思维链列（可选，没有就选“无”）",
+                            choices=[NO_THINK], value=NO_THINK,
+                        )
+                        prep_out_col = gr.Dropdown(label="output 回复列（必填）", choices=[])
+                        prep_name = gr.Textbox(
+                            label="统一数据名称（必填，将出现在训练列表）",
+                            placeholder="如 wukong_v1",
+                        )
+                        prep_generate_btn = gr.Button("2. 生成统一训练数据", variant="primary")
+                with gr.Column(scale=2):
+                    prep_inspect_output = gr.Textbox(
+                        label="列信息与样本", interactive=False, lines=12, max_lines=25,
+                    )
+                    prep_status = gr.Textbox(label="生成状态", interactive=False, lines=3, max_lines=8)
+                    prep_preview = gr.Textbox(
+                        label="统一后预览", interactive=False, lines=12, max_lines=25,
+                    )
+            prep_state = gr.State({})
+
         with gr.Tab("训练 (Train)"):
             with gr.Row():
                 with gr.Column(scale=1):
@@ -177,12 +315,20 @@ with gr.Blocks() as demo:
                             value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None,
                             label="选择模型",
                         )
+                        gr.Markdown(
+                            "只显示「🧹 数据处理」制成的统一数据。旧数据去隔壁 Tab 处理一遍再回来。"
+                        )
                         dataset_dropdown = gr.Dropdown(
                             choices=DATASET_DISPLAY_NAMES,
-                            value=[DATASET_DISPLAY_NAMES[0]] if DATASET_DISPLAY_NAMES else [],
+                            value=(
+                                [DATASET_DISPLAY_NAMES[0]]
+                                if DATASET_DISPLAY_NAMES
+                                else []
+                            ),
                             label="选择数据集 (可多选)",
                             multiselect=True,
                         )
+                        refresh_datasets_btn = gr.Button("🔄 刷新数据集列表")
                         truncate_dataset_checkbox = gr.Checkbox(
                             label="截断数据集用于快速测试",
                             value=True,
@@ -258,6 +404,27 @@ with gr.Blocks() as demo:
                 clear_button = gr.Button("清空", scale=1)
 
     # --- 事件绑定 ---
+    # 数据处理 Tab
+    prep_source_radio.change(
+        fn=_prep_source_ui,
+        inputs=[prep_source_radio],
+        outputs=[prep_upload, prep_hf_id, prep_hf_split, prep_existing],
+    )
+    prep_inspect_btn.click(
+        fn=_prep_inspect,
+        inputs=[prep_source_radio, prep_upload, prep_hf_id, prep_hf_split, prep_existing],
+        outputs=[prep_inspect_output, prep_state, prep_ins_col, prep_think_col, prep_out_col],
+    )
+    prep_generate_btn.click(
+        fn=_prep_generate,
+        inputs=[prep_state, prep_ins_col, prep_think_col, prep_out_col, prep_name],
+        outputs=[prep_status, prep_preview, dataset_dropdown, prep_existing],
+    )
+    refresh_datasets_btn.click(
+        fn=_refresh_train_datasets,
+        outputs=[preview_output, dataset_dropdown],
+    )
+
     training_mode_selector.change(
         fn=_update_training_mode_ui,
         inputs=training_mode_selector,
