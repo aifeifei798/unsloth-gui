@@ -121,7 +121,7 @@ def _load_model_wrapper(base, lora, progress=gr.Progress(track_tqdm=True)):
     return f"{msg}\n{loaded_info()}", gr.update(choices=list_trained_loras())
 
 
-with gr.Blocks(theme=gr.themes.Soft(), css="footer {display: none !important}") as demo:
+with gr.Blocks() as demo:
     gr.Markdown("# Unsloth GUI Trainer & Playground (v4.0)")
     if CONFIG_WARNINGS:
         gr.Markdown("⚠️ " + "\n\n⚠️ ".join(CONFIG_WARNINGS))
@@ -214,7 +214,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css="footer {display: none !important}") 
                 temp_slider = gr.Slider(0.1, 1.5, value=0.7, step=0.05, label="Temperature")
                 top_p_slider = gr.Slider(0.1, 1.0, value=0.95, step=0.05, label="Top-p")
                 top_k_slider = gr.Slider(1, 100, value=40, step=1, label="Top-k")
-            chatbot = gr.Chatbot(label="聊天窗口", type="messages", height=500)
+            chatbot = gr.Chatbot(label="聊天窗口", height=500)
             with gr.Row():
                 chat_input_textbox = gr.Textbox(
                     show_label=False, placeholder="输入你的消息...", scale=4, container=False,
@@ -307,7 +307,7 @@ def main():
 
     demo.queue(max_size=8).launch(
         server_name=args.host, server_port=args.port, share=args.share,
-        inbrowser=False,
+        inbrowser=False, theme=gr.themes.Soft(), css="footer {display: none !important}",
     )
 
 

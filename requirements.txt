@@ -11,6 +11,6 @@ unsloth
 bitsandbytes>=0.43
 
 # --- 本项目直接用的：UI / 监控 / 下载加速 ---
-gradio>=4.0,<6.0
+gradio>=6.27
 tensorboard
 hf_transfer
