@@ -67,37 +67,33 @@
 
 #### a) 配置模型
 
-编辑根目录下的 `models.json` 文件，添加您想使用的 Unsloth 支持的模型。
+直接在「🤖 模型管理」Tab 里增删改，不用手改文件：
+来源支持**本地路径**（相对项目根或绝对路径，添加时校验存在性）、
+**HuggingFace ID**（如 `unsloth/Qwen3-8B`，首次使用自动下载）、
+**魔搭 ModelScope ID**（如 `unsloth/Qwen3-8B`，首次使用自动 `snapshot_download`
+到本地缓存，需 `pip install modelscope`）。
+同展示名添加即覆盖更新；改完训练和测试的模型下拉自动刷新。
 
-**示例 `models.json`:**
+手写 `models.json` 也依然兼容，示例：
 ```json
 [
   {
-    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
-    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized", //本地模型
-    "load_in_4bit": true,
-    "dtype": null
-  },
-  {
-    "display_name": "Mistral 7B Instruct v0.2 (4-bit)",
-    "model_id": "unsloth/mistral-7b-instruct-v0.2-bnb-4bit",
+    "display_name": "Qwen3-8B 魔搭版",
+    "model_id": "unsloth/Qwen3-8B",
+    "source": "modelscope",
     "load_in_4bit": true,
     "dtype": null
   },
   {
     "display_name": "Llama-3 8B Instruct (4-bit)",
     "model_id": "unsloth/llama-3-8b-instruct-bnb-4bit",
+    "source": "huggingface",
     "load_in_4bit": true,
     "dtype": null
-  },
-  {
-    "display_name": "Phi-3 Mini 4k Instruct (bf16)",
-    "model_id": "unsloth/phi-3-mini-4k-instruct",
-    "load_in_4bit": false,
-    "dtype": "bfloat16"
   }
 ]
 ```
+`source` 可省略（auto）：本地存在即按本地，否则按 HuggingFace。
 
 #### b) 准备数据集（必须走「🧹 数据处理」Tab）
 

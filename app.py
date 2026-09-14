@@ -19,6 +19,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
+from src.config import load_models_config, save_models_config, ModelConfig
 from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
@@ -52,6 +53,128 @@ def _reload_datasets():
     DATASET_DISPLAY_NAMES = _processed_names(fresh)
     ALL_DATASET_NAMES = [d.display_name for d in fresh]
     return warns
+
+
+MODEL_SOURCE_OPTIONS = ["本地路径", "HuggingFace", "魔搭 ModelScope"]
+_MODEL_SOURCE_MAP = {"本地路径": "local", "HuggingFace": "huggingface",
+                     "魔搭 ModelScope": "modelscope"}
+
+
+def _reload_models():
+    """重读 models.json 并刷新全局列表，返回告警信息."""
+    global MODELS, MODEL_DISPLAY_NAMES
+    try:
+        MODELS[:] = load_models_config()
+    except Exception as e:
+        return [f"模型配置加载失败: {e}"]
+    MODEL_DISPLAY_NAMES = [m.display_name for m in MODELS]
+    return []
+
+
+def _model_rows():
+    from src.config import model_source, SOURCE_LABEL
+    rows = []
+    for m in MODELS:
+        src = model_source(m)
+        rows.append([
+            m.display_name,
+            SOURCE_LABEL.get(src, src),
+            m.model_id,
+            "是" if m.load_in_4bit else "否",
+            m.dtype or "自动",
+            str(m.max_seq_length),
+        ])
+    return rows
+
+
+def _model_dd_updates(cur_train, cur_inf):
+    """训练/测试下拉刷新：保留仍有效的选择，失效则回落第一个."""
+    train_val = (cur_train if cur_train in MODEL_DISPLAY_NAMES
+                 else (MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None))
+    inf_val = (cur_inf if cur_inf in MODEL_DISPLAY_NAMES
+               else (MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None))
+    return (
+        gr.update(choices=MODEL_DISPLAY_NAMES, value=train_val),
+        gr.update(choices=MODEL_DISPLAY_NAMES, value=inf_val),
+    )
+
+
+def _model_add_or_update(display, source, model_id, use_4bit, dtype, seq_len, chat,
+                         cur_train, cur_inf):
+    from src.config import find_by_name as _find
+    display = (display or "").strip()
+    model_id = (model_id or "").strip()
+    if not display:
+        return ("❌ 展示名不能为空。",) + (gr.update(),) * 4
+    if not model_id:
+        return ("❌ 模型 ID / 路径不能为空。",) + (gr.update(),) * 4
+    if source != "本地路径" and " " in model_id:
+        return ("❌ 远端模型 ID 不能包含空格，请检查。",) + (gr.update(),) * 4
+    if source == "本地路径":
+        p = Path(model_id)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        if not p.exists():
+            return (f"❌ 本地路径不存在: {model_id}（解析为 {p}）。"
+                     f"请检查路径或换来源。",) + (gr.update(),) * 4
+    try:
+        seq = int(seq_len)
+    except (TypeError, ValueError):
+        return ("❌ 上下文长度必须是数字。",) + (gr.update(),) * 4
+    if seq < 256:
+        return ("❌ 上下文长度至少 256。",) + (gr.update(),) * 4
+    existed = _find(MODELS, display) is not None
+    cfg = ModelConfig(
+        display_name=display, model_id=model_id, load_in_4bit=bool(use_4bit),
+        dtype=None if dtype == "自动" else dtype, max_seq_length=seq,
+        chat_template=(chat or "").strip() or None,
+        source=_MODEL_SOURCE_MAP[source],
+    )
+    MODELS[:] = [c for c in MODELS if c.display_name != display] + [cfg]
+    try:
+        save_models_config(MODELS)
+    except Exception as e:
+        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 4
+    warns = _reload_models()
+    action = "已更新" if existed else "已添加"
+    msg = f"✅ {action}模型 '{display}'（{source}）。"
+    if source == "魔搭 ModelScope":
+        msg += "首次训练/加载时自动从魔搭下载到本地缓存（需 pip install modelscope）。"
+    if warns:
+        msg += f"\n⚠️ {warns}"
+    dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
+    return (msg, gr.update(value=_model_rows()),
+            gr.update(choices=MODEL_DISPLAY_NAMES,
+                      value=display if display in MODEL_DISPLAY_NAMES else None),
+            dd_train, dd_inf)
+
+
+def _model_delete(name, cur_train, cur_inf):
+    if not name:
+        return ("❌ 请先选择要删除的模型。",) + (gr.update(),) * 4
+    if len(MODELS) <= 1:
+        return ("❌ 至少保留一个模型，不能全删。",) + (gr.update(),) * 4
+    MODELS[:] = [c for c in MODELS if c.display_name != name]
+    try:
+        save_models_config(MODELS)
+    except Exception as e:
+        return (f"❌ 写 models.json 失败: {e}",) + (gr.update(),) * 4
+    warns = _reload_models()
+    msg = f"🗑 已删除模型 '{name}'。" + (f"\n⚠️ {warns}" if warns else "")
+    dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
+    return (msg, gr.update(value=_model_rows()),
+            gr.update(choices=MODEL_DISPLAY_NAMES,
+                      value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None),
+            dd_train, dd_inf)
+
+
+def _models_refresh(cur_train, cur_inf):
+    warns = _reload_models()
+    msg = (f"已刷新：共 {len(MODEL_DISPLAY_NAMES)} 个模型。"
+           + (f"\n⚠️ {warns}" if warns else ""))
+    dd_train, dd_inf = _model_dd_updates(cur_train, cur_inf)
+    return (msg, gr.update(value=_model_rows()),
+            gr.update(choices=MODEL_DISPLAY_NAMES), dd_train, dd_inf)
 
 # --- 纯视觉主题（不影响任何功能逻辑） ---
 APP_THEME = gr.themes.Soft(
@@ -262,6 +385,57 @@ with gr.Blocks() as demo:
         gr.Markdown(f"⚠️ 检测到有训练正在运行: {current_experiment()}")
 
     with gr.Tabs():
+        with gr.Tab("🤖 模型管理 (Models)"):
+            gr.Markdown("## 🤖 模型列表")
+            gr.Markdown(
+                "本地路径 / HuggingFace / 魔搭 ModelScope 都能加，改完训练和测试的模型下拉自动刷新。"
+                "（以前要手改 `models.json`，现在不用了）"
+            )
+            models_table = gr.Dataframe(
+                headers=["展示名", "来源", "模型ID/路径", "4bit", "精度", "上下文长度"],
+                datatype=["str"] * 6, row_count=(0, "dynamic"), column_count=6,
+                interactive=False, wrap=True, value=_model_rows(),
+            )
+            with gr.Row():
+                with gr.Column(scale=1):
+                    with gr.Accordion("添加 / 更新（同展示名覆盖）", open=True):
+                        m_display = gr.Textbox(label="展示名（必填，列表里显示的名字）",
+                                               placeholder="如 Qwen3-8B 魔搭版")
+                        m_source = gr.Radio(MODEL_SOURCE_OPTIONS, value="HuggingFace",
+                                            label="来源")
+                        m_id = gr.Textbox(
+                            label="模型 ID / 本地路径（必填）",
+                            placeholder="本地填路径（相对项目根或绝对）；远端填 ID，如 unsloth/Qwen3-8B",
+                            lines=2,
+                        )
+                        with gr.Row():
+                            m_4bit = gr.Checkbox(label="4bit 量化加载", value=True)
+                            m_dtype = gr.Dropdown(label="精度",
+                                                  choices=["自动", "bfloat16", "float16"],
+                                                  value="自动")
+                        with gr.Row():
+                            m_seq = gr.Number(label="上下文长度", value=2048,
+                                              minimum=256, step=256)
+                            m_chat = gr.Textbox(label="chat_template（可选）",
+                                                placeholder="如 qwen-2.5，留空不强制")
+                        m_add_btn = gr.Button("✅ 添加 / 更新模型", variant="primary")
+                with gr.Column(scale=1):
+                    with gr.Accordion("删除 / 刷新", open=True):
+                        m_del = gr.Dropdown(
+                            label="选择要删除的模型",
+                            choices=MODEL_DISPLAY_NAMES,
+                            value=MODEL_DISPLAY_NAMES[0] if MODEL_DISPLAY_NAMES else None,
+                        )
+                        with gr.Row():
+                            m_del_btn = gr.Button("🗑 删除所选模型", variant="stop")
+                            m_refresh_btn = gr.Button("🔄 刷新列表")
+                        m_status = gr.Textbox(label="操作状态", interactive=False,
+                                              lines=4, max_lines=10)
+                        gr.Markdown(
+                            "说明：魔搭模型首次训练/加载时自动下载到本地缓存；"
+                            "本地路径必须是已存在的目录；远端 ID 只做格式检查，下载失败会在训练时报错。"
+                        )
+
         with gr.Tab("🧹 数据处理 (Data Prep)"):
             gr.Markdown("## 🧹 把任意数据制成统一训练数据")
             gr.Markdown(
@@ -438,6 +612,24 @@ with gr.Blocks() as demo:
                 clear_button = gr.Button("清空", scale=1)
 
     # --- 事件绑定 ---
+    # 模型管理 Tab
+    m_add_btn.click(
+        fn=_model_add_or_update,
+        inputs=[m_display, m_source, m_id, m_4bit, m_dtype, m_seq, m_chat,
+                model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+    )
+    m_del_btn.click(
+        fn=_model_delete,
+        inputs=[m_del, model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+    )
+    m_refresh_btn.click(
+        fn=_models_refresh,
+        inputs=[model_dropdown, inference_model_selector],
+        outputs=[m_status, models_table, m_del, model_dropdown, inference_model_selector],
+    )
+
     # 数据处理 Tab
     prep_source_radio.change(
         fn=_prep_source_ui,

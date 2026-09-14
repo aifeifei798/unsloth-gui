@@ -24,6 +24,7 @@ class ModelConfig:
     dtype: Optional[str] = None  # "bfloat16" | "float16" | None(auto)
     max_seq_length: int = 2048
     chat_template: Optional[str] = None  # 如 "llama-3.1" / "qwen-2.5" / "gemma-3"，None 则不强制
+    source: str = "auto"  # auto | local | huggingface | modelscope
     extra: dict = field(default_factory=dict)
 
     def resolved_model_id(self) -> str:
@@ -82,7 +83,12 @@ def _ensure_unique_display_names(items: list[dict], source: str) -> None:
 def _model_from_dict(d: dict) -> ModelConfig:
     if "display_name" not in d or "model_id" not in d:
         raise ValueError(f"模型配置缺字段（需要 display_name/model_id）: {d}")
-    known = {"display_name", "model_id", "load_in_4bit", "dtype", "max_seq_length", "chat_template"}
+    known = {"display_name", "model_id", "load_in_4bit", "dtype", "max_seq_length",
+             "chat_template", "source"}
+    source = str(d.get("source", "auto") or "auto").lower()
+    if source not in ("auto", "local", "huggingface", "modelscope"):
+        raise ValueError(f"模型 '{d.get('display_name')}' 的 source 非法: {source}，"
+                         f"只能是 auto/local/huggingface/modelscope。")
     return ModelConfig(
         display_name=d["display_name"],
         model_id=d["model_id"],
@@ -90,6 +96,7 @@ def _model_from_dict(d: dict) -> ModelConfig:
         dtype=d.get("dtype"),
         max_seq_length=int(d.get("max_seq_length", 2048)),
         chat_template=d.get("chat_template"),
+        source=source,
         extra={k: v for k, v in d.items() if k not in known},
     )
 
@@ -183,3 +190,77 @@ def find_by_name(items: list, name: str) -> Optional[Any]:
         if getattr(it, "display_name", None) == name:
             return it
     return None
+
+
+SOURCE_LABEL = {"local": "本地路径", "huggingface": "HuggingFace",
+                "modelscope": "魔搭 ModelScope", "auto": "自动判断"}
+
+
+def model_source(cfg: ModelConfig) -> str:
+    """判定模型来源：显式配置优先，auto 则看本地是否存在该路径."""
+    s = (cfg.source or "auto").lower()
+    if s in ("local", "huggingface", "modelscope"):
+        return s
+    mid = cfg.model_id
+    if mid.startswith((".", "/", "~")) or Path(mid).is_absolute():
+        return "local"
+    if (PROJECT_ROOT / mid).exists():
+        return "local"
+    return "huggingface"
+
+
+def ensure_local_model(cfg: ModelConfig) -> str:
+    """返回可直接喂给 FastLanguageModel.from_pretrained 的地址.
+
+    - 本地：解析后的绝对路径（不存在则报错）
+    - HuggingFace：ID 原样返回（首次使用自动下载）
+    - 魔搭：snapshot_download 落到本地缓存后返回目录（需 pip install modelscope）
+    """
+    src = model_source(cfg)
+    if src == "modelscope":
+        try:
+            from modelscope.hub.snapshot_download import snapshot_download
+        except ImportError as e:
+            raise RuntimeError(
+                "要用魔搭模型请先安装: pip install modelscope") from e
+        return snapshot_download(cfg.model_id.strip())
+    if src == "local":
+        p = cfg.resolved_model_id()
+        if not Path(p).exists():
+            raise FileNotFoundError(
+                f"本地模型路径未找到: {cfg.model_id}（解析为 {p}）。"
+                f"请在「模型管理」里改成正确的路径。")
+        return p
+    if not cfg.model_id or not cfg.model_id.strip():
+        raise ValueError(f"模型 '{cfg.display_name}' 的 ID 为空。")
+    return cfg.model_id.strip()
+
+
+def model_to_dict(cfg: ModelConfig) -> dict:
+    d: dict = {
+        "display_name": cfg.display_name,
+        "model_id": cfg.model_id,
+        "load_in_4bit": bool(cfg.load_in_4bit),
+        "dtype": cfg.dtype,
+    }
+    if cfg.max_seq_length != 2048:
+        d["max_seq_length"] = int(cfg.max_seq_length)
+    if cfg.chat_template:
+        d["chat_template"] = cfg.chat_template
+    if (cfg.source or "auto") != "auto":
+        d["source"] = cfg.source
+    d.update(cfg.extra or {})
+    return d
+
+
+def save_models_config(models: list[ModelConfig],
+                       path: Path | str = PROJECT_ROOT / "models.json") -> None:
+    """原子写回 models.json（先写临时文件再替换，防写一半崩）。"""
+    path = Path(path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump([model_to_dict(m) for m in models], f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    tmp.replace(path)

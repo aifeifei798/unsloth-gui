@@ -1,6 +1,7 @@
 """数据集准备：修复原来 prompt_template.format 脆弱、schema 不一致就炸等问题."""
 from __future__ import annotations
 
+import re
 import string
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,19 @@ def validate_template_columns(cfg: DatasetConfig) -> list[str]:
     return missing
 
 
+# 内容为空的段落头（如某行没有 input 上下文时的 "### Input:" 空段），
+# 后面只跟空白 + 下一个段落或结尾时整段删掉，避免浪费 token。
+# 只认我们自己的段头，不碰正文内容；Response 恒非空，不在清理之列。
+_EMPTY_SECTION_RE = re.compile(
+    r"### (?:Instruction|Input|Thinking):\n(?:[ \t]*\n)+(?=### |\s*\Z)"
+)
+
+
+def drop_empty_sections(text: str) -> str:
+    """删掉内容为空的模板段落。生成侧预览共用，保证所见即所得。"""
+    return _EMPTY_SECTION_RE.sub("", text)
+
+
 def _format_row(prompt_template: str, column_mappings: dict, row: dict, idx: int) -> str:
     fmt: dict = {}
     for placeholder, col in column_mappings.items():
@@ -26,7 +40,7 @@ def _format_row(prompt_template: str, column_mappings: dict, row: dict, idx: int
         v = row[col]
         fmt[placeholder] = "" if v is None else str(v)
     try:
-        return prompt_template.format(**fmt)
+        return drop_empty_sections(prompt_template.format(**fmt))
     except KeyError as e:
         raise ValueError(
             f"prompt_template 里的占位符 {e} 在 input_columns Lima没有对应 key。"

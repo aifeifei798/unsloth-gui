@@ -80,10 +80,15 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 except Exception:
                     pass
             from unsloth import FastLanguageModel
+            from .config import ensure_local_model
 
+            try:
+                model_path = ensure_local_model(model_cfg)
+            except Exception as e:
+                return f"❌ 模型地址解析失败: {e}"
             seq_len = int(getattr(model_cfg, "max_seq_length", 2048) or 2048)
             model, tokenizer = FastLanguageModel.from_pretrained(
-                model_name=model_cfg.resolved_model_id(),
+                model_name=model_path,
                 max_seq_length=seq_len,
                 load_in_4bit=bool(model_cfg.load_in_4bit),
             )

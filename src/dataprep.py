@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import PROJECT_ROOT, DatasetConfig
+from .dataset_utils import drop_empty_sections
 
 PROCESSED_ROOT = PROJECT_ROOT / "local_data" / "processed"
 UPLOAD_ROOT = PROJECT_ROOT / "local_data" / "uploads"
@@ -272,7 +273,7 @@ def preview_row(state: dict, instruction_cols, input_cols,
     if unified is None:
         return "⚠️ 这一行的 output 回复列是空的，生成时会被丢弃。换个映射或检查数据。"
     template, _ = build_template(bool(mapping["input"]))
-    filled = template.format(**unified)  # 单行预览不截断，完整显示
+    filled = drop_empty_sections(template.format(**unified))  # 单行预览不截断，完整显示
     roles_desc = " + ".join(
         f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
     if mapping["think"]:
@@ -395,7 +396,7 @@ def generate_unified(state: dict, instruction_cols, input_cols,
         roles_desc += "（Response = think + output 拼接）"
     prev_lines = [status, f"映射: {roles_desc}", "-" * 60]
     for i, r in enumerate(rows[:2]):
-        filled = template.format(**r)
+        filled = drop_empty_sections(template.format(**r))
         if len(filled) > 1000:
             filled = filled[:1000] + "\n…(截断)"
         prev_lines.append(f"[统一后样本 {i+1}]\n{filled}\n" + "-" * 60)

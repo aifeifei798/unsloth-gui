@@ -168,8 +168,6 @@ class TrainRequest:
 
 def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]:
     """生成器：yield 状态文本，Gradio 侧保持响应 + 可取消."""
-    import torch
-
     exp = (req.experiment_name or "").strip().replace(" ", "_")
     if not exp:
         yield "错误：实验名称不能为空。"
@@ -185,6 +183,7 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
     _cancel_event.clear()
     try:
         from .config import load_datasets_config, load_models_config, find_by_name
+        from .config import ensure_local_model
         from .dataset_utils import prepare_dataset, combine_datasets, apply_chat_template_if_needed
 
         yield f"准备实验: {exp}"
@@ -229,7 +228,9 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
         combined = combine_datasets(all_ds)
         yield f"数据集就绪：共 {len(combined)} 条（{len(all_ds)} 个数据集合并）。"
 
-        # 延迟导入重型依赖，UI 无 GPU 也能先打开
+        # 延迟导入重型依赖，UI 无 GPU 也能先打开；
+        # torch 只在真正要碰模型时才导入，前面的数据校验不需要它
+        import torch
         try:
             torch._dynamo.config.recompile_limit = 100
         except Exception:
@@ -242,11 +243,16 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             except Exception:
                 pass
         yield f"初始化模型: {model_cfg.model_id} ..."
+        try:
+            model_path = ensure_local_model(model_cfg)
+        except Exception as e:
+            yield f"❌ 模型地址解析失败: {e}"
+            return
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
         dtype = dtype_map.get(model_cfg.dtype) if model_cfg.dtype else None
         seq_len = int(req.max_seq_length or model_cfg.max_seq_length or 2048)
         model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_cfg.resolved_model_id(),
+            model_name=model_path,
             max_seq_length=seq_len,
             dtype=dtype,
             load_in_4bit=bool(model_cfg.load_in_4bit),
