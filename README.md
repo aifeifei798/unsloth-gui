@@ -54,15 +54,11 @@
     # 在 Windows 上，使用: venv\Scripts\activate
     ```
 
-3.  **安装依赖（顺序很重要）**
+3.  **安装依赖**（unsloth 会自动带上 torch 及训练栈，不用手动装）
     ```bash
-    # 先装 torch（按你的 CUDA 版本二选一）
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-    # 再按官方文档装 unsloth（与 torch/CUDA 强绑定）
-    # https://docs.unsloth.ai/get-started/installation
-    pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-    # 最后装其余
     pip install -r requirements.txt
+    # 或用 uv 自动匹配 torch 后端（推荐）：
+    # uv pip install -r requirements.txt --torch-backend=auto
     ```
 
 ### 3. 项目配置

@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv git && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-# 注意：unsloth 请按官方文档在首次构建后单独安装，保证与 torch/CUDA 匹配
 RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
 
 COPY . .

@@ -1,31 +1,16 @@
-# 安装顺序很重要：先装 torch（含 CUDA），再装 unsloth，最后装其余。
-# 示例（CUDA 12.1）：
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-#   pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+# unsloth 会自动带上训练栈（torch / transformers / trl / peft / datasets /
+# accelerate / unsloth_zoo 等），不用手动 pin，跟着 unsloth 走就行。
+# 安装：
 #   pip install -r requirements.txt
-#
-# 下面 pin 保证 新 TRL(SFTConfig/processing_class) 与旧版代码都能跑，
-# train_utils.py 会自动探测回退，所以放宽为区间而不是 ==。
+# 或（推荐，自动匹配 torch 后端）：
+#   uv venv --python 3.13 && source .venv/bin/activate
+#   uv pip install -r requirements.txt --torch-backend=auto
 
-torch>=2.4,<2.9
-torchvision
-torchaudio
-transformers>=4.45,<5.14
-datasets>=2.18,<4.0
-accelerate>=0.34
-peft>=0.12
-trl>=0.12,<0.27
+# --- 核心：训练/推理（torch 由它自动解决） ---
+unsloth
 bitsandbytes>=0.43
-safetensors
-sentencepiece
-protobuf
-hf_transfer
-tensorboard
+
+# --- 本项目直接用的：UI / 监控 / 下载加速 ---
 gradio>=4.0,<6.0
-timm
-xformers
-cut_cross_entropy
-unsloth_zoo
-# unsloth 本体请按官方文档单独安装（与 torch/CUDA 强绑定），不要在这里 pin：
-# https://docs.unsloth.ai/get-started/installation
-# unsloth
+tensorboard
+hf_transfer
