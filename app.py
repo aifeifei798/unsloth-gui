@@ -34,6 +34,41 @@ MODELS, DATASETS, CONFIG_WARNINGS = safe_load_configs()
 MODEL_DISPLAY_NAMES = [m.display_name for m in MODELS]
 DATASET_DISPLAY_NAMES = [d.display_name for d in DATASETS]
 
+# --- 纯视觉主题（不影响任何功能逻辑） ---
+APP_THEME = gr.themes.Soft(
+    primary_hue=gr.themes.colors.indigo,
+    secondary_hue=gr.themes.colors.sky,
+    neutral_hue=gr.themes.colors.slate,
+    radius_size=gr.themes.sizes.radius_md,
+)
+
+APP_CSS = """
+footer {display: none !important}
+body {font-family: -apple-system, "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important}
+#app-hero {
+  background: linear-gradient(135deg, #312e81 0%, #4f46e5 55%, #0284c7 100%);
+  border-radius: 16px; padding: 28px 32px; margin-bottom: 12px; color: #fff;
+  box-shadow: 0 8px 24px rgba(49, 46, 129, .25);
+}
+#app-hero h1 {margin: 0; font-size: 28px; letter-spacing: .5px}
+#app-hero p {margin: 8px 0 0; opacity: .85; font-size: 14px}
+#app-hero .ver {
+  display: inline-block; margin-top: 10px; font-size: 12px;
+  background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+  padding: 2px 10px; border-radius: 999px;
+}
+button.lg.primary {font-weight: 600}
+.tabs > .tab-nav button {font-weight: 500}
+"""
+
+HERO_HTML = """
+<div id="app-hero">
+  <h1>🚀 Unsloth GUI Trainer & Playground</h1>
+  <p>轻量 · 单卡 · 专属 SFT 微调工作台 — 配置、训练、监控、对话，一页完成</p>
+  <span class="ver">v4.0 · Gradio 6 · Unsloth Core</span>
+</div>
+"""
+
 
 def _update_training_mode_ui(mode):
     is_epoch_mode = mode == "按轮次 (Epochs)"
@@ -122,7 +157,7 @@ def _load_model_wrapper(base, lora, progress=gr.Progress(track_tqdm=True)):
 
 
 with gr.Blocks() as demo:
-    gr.Markdown("# Unsloth GUI Trainer & Playground (v4.0)")
+    gr.HTML(HERO_HTML)
     if CONFIG_WARNINGS:
         gr.Markdown("⚠️ " + "\n\n⚠️ ".join(CONFIG_WARNINGS))
     if is_training():
@@ -307,7 +342,7 @@ def main():
 
     demo.queue(max_size=8).launch(
         server_name=args.host, server_port=args.port, share=args.share,
-        inbrowser=False, theme=gr.themes.Soft(), css="footer {display: none !important}",
+        inbrowser=False, theme=APP_THEME, css=APP_CSS,
     )
 
 
