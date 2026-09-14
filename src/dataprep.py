@@ -3,10 +3,11 @@
 统一 schema（训练只认这个，四个角色都可多选，多列按顺序换行拼接）：
     instruction: str  # 指令/问题（至少映射 1 列）
     input: str        # 补充输入/上下文（可选）
-    think: str        # 思维链（可选）
-    output: str       # 回复（至少映射 1 列，空回复的行会被丢弃并计数）
+    think: str        # 思维链（可选，仅存档备查）
+    output: str       # 回复 = think + output 拼接（至少映射 1 列，
+                      #   空回复的行会被丢弃并计数）
 
-模板按实际映射动态组装（没映射 input/think 就没有对应段落，不浪费 token）。
+模板按实际映射动态组装（没映射 input 就没有 Input 段；Response 恒为 think+output）。
 产物（local_data/processed/<name>/）：
     data.jsonl        # 人可读的统一数据
     hf_dataset/       # arrow 落盘，训练时 load_from_disk 秒载
@@ -28,23 +29,20 @@ PROCESSED_ROOT = PROJECT_ROOT / "local_data" / "processed"
 UPLOAD_ROOT = PROJECT_ROOT / "local_data" / "uploads"
 DATASETS_CONFIG_DIR = PROJECT_ROOT / "datasets_config"
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 ROLES = ("instruction", "input", "think", "output")
 ROLE_LABEL = {"instruction": "instruction 输入", "input": "input 上下文",
               "think": "think 思维链", "output": "output 回复"}
 
 
-def build_template(use_input: bool, use_think: bool) -> tuple[str, dict]:
-    """按实际映射组装模板与 input_columns."""
+def build_template(use_input: bool) -> tuple[str, dict]:
+    """按实际映射组装模板与 input_columns（Response 恒为 think+output 合并）。"""
     parts = ["### Instruction:\n{instruction}"]
     columns = {"instruction": "instruction"}
     if use_input:
         parts.append("### Input:\n{input}")
         columns["input"] = "input"
-    if use_think:
-        parts.append("### Thinking:\n{think}")
-        columns["think"] = "think"
     parts.append("### Response:\n{output}")
     columns["output"] = "output"
     return "\n\n".join(parts), columns
@@ -176,7 +174,8 @@ def inspect_text(kind: str, hf_id: str = "", split: str = "train",
     state = {"kind": kind, "hf_id": hf_id, "split": split,
              "local_path": local_path,
              "existing_name": existing.display_name if existing else "",
-             "columns": cols, "n_rows": n_rows, "streamed": streamed}
+             "columns": cols, "n_rows": n_rows, "streamed": streamed,
+             "first_row": row}
     return "\n".join(lines), state
 
 
@@ -201,15 +200,9 @@ def _merge(row: dict, cols: list) -> str:
     return "\n".join(_cell(row.get(c)) for c in cols if _cell(row.get(c)))
 
 
-def generate_unified(state: dict, instruction_cols, input_cols,
-                     think_cols, output_cols, output_name: str,
-                     fixed_instruction: str = "", progress=None) -> tuple[str, str, str]:
-    """生成统一数据。四个角色都可多选；instruction 还支持手写固定文本
-   （数据里没有对应列时用它，所有行共用；同时映射了列则做前缀拼在前面）.
-    返回 (状态文本, 预览文本, 新数据集display_name)."""
-    if not state or not state.get("columns"):
-        raise ValueError("请先点「1. 读取列信息」。")
-    cols = state["columns"]
+def resolve_mapping(columns: list, instruction_cols, input_cols,
+                      think_cols, output_cols, fixed_instruction: str = "") -> tuple[dict, str]:
+    """校验映射并返回 (mapping, 固定指令). 预览和生成共用，保证所见即所得。"""
     mapping = {
         "instruction": _as_list(instruction_cols),
         "input": _as_list(input_cols),
@@ -218,9 +211,10 @@ def generate_unified(state: dict, instruction_cols, input_cols,
     }
     for role, selected in mapping.items():
         for c in selected:
-            if c not in cols:
-                raise ValueError(f"{ROLE_LABEL[role]}里有不存在的列 '{c}'，实际列: {cols}。")
-    if not mapping["instruction"] and not (fixed_instruction or "").strip():
+            if c not in columns:
+                raise ValueError(f"{ROLE_LABEL[role]}里有不存在的列 '{c}'，实际列: {columns}。")
+    fixed_ins = (fixed_instruction or "").strip()
+    if not mapping["instruction"] and not fixed_ins:
         raise ValueError("instruction 没有映射任何列，请至少选择 1 列，或在「固定指令」里手写一句。")
     if not mapping["output"]:
         raise ValueError("请至少选择 1 列作为 output 回复。")
@@ -232,6 +226,62 @@ def generate_unified(state: dict, instruction_cols, input_cols,
                     f"列 '{c}' 同时被映射为{ROLE_LABEL[seen[c]]}和{ROLE_LABEL[role]}，"
                     f"一列只能担任一个角色。")
             seen[c] = role
+    return mapping, fixed_ins
+
+
+def format_unified_row(row: dict, mapping: dict, fixed_ins: str = "") -> Optional[dict]:
+    """单行转统一格式（含 Response = think + output）。output 为空返回 None（该行丢弃）。"""
+    out_raw = _merge(row, mapping["output"])
+    if not out_raw:
+        return None
+    think_raw = _merge(row, mapping["think"])
+    out = f"{think_raw}\n{out_raw}" if think_raw else out_raw
+    ins_merged = _merge(row, mapping["instruction"])
+    instruction = f"{fixed_ins}\n{ins_merged}" if fixed_ins and ins_merged else (fixed_ins or ins_merged)
+    return {
+        "instruction": instruction,
+        "input": _merge(row, mapping["input"]),
+        "think": think_raw,
+        "output": out,
+    }
+
+
+def preview_row(state: dict, instruction_cols, input_cols,
+                think_cols, output_cols, fixed_instruction: str = "") -> str:
+    """用读取时暂存的首行，按当前映射渲染最终训练文本（与生成逻辑同一套代码）。"""
+    if not state or not state.get("columns"):
+        raise ValueError("请先点「1. 读取列信息」。")
+    row = state.get("first_row")
+    if row is None:
+        raise ValueError("数据源是空的，没有可预览的行。")
+    mapping, fixed_ins = resolve_mapping(
+        state["columns"], instruction_cols, input_cols, think_cols, output_cols,
+        fixed_instruction)
+    unified = format_unified_row(row, mapping, fixed_ins)
+    if unified is None:
+        return "⚠️ 这一行的 output 回复列是空的，生成时会被丢弃。换个映射或检查数据。"
+    template, _ = build_template(bool(mapping["input"]))
+    filled = template.format(**unified)
+    if len(filled) > 2000:
+        filled = filled[:2000] + "\n…(截断)"
+    roles_desc = " + ".join(
+        f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
+    if mapping["think"]:
+        roles_desc += "（Response = think + output 拼接）"
+    return f"[单行预览] 映射: {roles_desc}\n" + "-" * 60 + f"\n{filled}"
+
+
+def generate_unified(state: dict, instruction_cols, input_cols,
+                     think_cols, output_cols, output_name: str,
+                     fixed_instruction: str = "", progress=None) -> tuple[str, str, str]:
+    """生成统一数据。四个角色都可多选；instruction 还支持手写固定文本
+   （数据里没有对应列时用它，所有行共用；同时映射了列则做前缀拼在前面）.
+    返回 (状态文本, 预览文本, 新数据集display_name)."""
+    if not state or not state.get("columns"):
+        raise ValueError("请先点「1. 读取列信息」。")
+    mapping, fixed_ins = resolve_mapping(
+        state["columns"], instruction_cols, input_cols, think_cols, output_cols,
+        fixed_instruction)
 
     name = sanitize_name(output_name)
     cfg_path = DATASETS_CONFIG_DIR / f"{name}.json"
@@ -267,20 +317,12 @@ def generate_unified(state: dict, instruction_cols, input_cols,
             pass
     rows: list[dict] = []
     dropped_empty = 0
-    fixed_ins = (fixed_instruction or "").strip()
     for row in ds:
-        out = _merge(row, mapping["output"])
-        if not out:
+        unified = format_unified_row(row, mapping, fixed_ins)
+        if unified is None:
             dropped_empty += 1
             continue
-        ins_merged = _merge(row, mapping["instruction"])
-        instruction = f"{fixed_ins}\n{ins_merged}" if fixed_ins and ins_merged else (fixed_ins or ins_merged)
-        rows.append({
-            "instruction": instruction,
-            "input": _merge(row, mapping["input"]),
-            "think": _merge(row, mapping["think"]),
-            "output": out,
-        })
+        rows.append(unified)
     if not rows:
         raise ValueError("有效行数为 0（所有行的 output 列都是空的），请检查列映射。")
 
@@ -317,8 +359,7 @@ def generate_unified(state: dict, instruction_cols, input_cols,
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     use_input = bool(mapping["input"])
-    use_think = bool(mapping["think"])
-    template, input_columns = build_template(use_input, use_think)
+    template, input_columns = build_template(use_input)
     cfg = {
         "display_name": name,
         "dataset_id": f"./local_data/processed/{name}/hf_dataset",
@@ -341,6 +382,8 @@ def generate_unified(state: dict, instruction_cols, input_cols,
               + (f"（丢弃空回复 {dropped_empty} 行）" if dropped_empty else ""))
     roles_desc = " + ".join(
         f"{role}({len(mapping[role])}列)" for role in ROLES if mapping[role])
+    if mapping["think"]:
+        roles_desc += "（Response = think + output 拼接）"
     prev_lines = [status, f"映射: {roles_desc}", "-" * 60]
     for i, r in enumerate(rows[:2]):
         filled = template.format(**r)

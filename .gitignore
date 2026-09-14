@@ -43,6 +43,8 @@ unsloth_compiled_cache/
 # 7. 忽略 datasets 落盘缓存与 arrow 二进制（可用 jsonl/csv 重新生成）
 *.arrow
 local_data/*_for_gui/
+local_data/processed/
+local_data/uploads/
 local_data/dataset_info.json
 local_data/state.json
 .cache/

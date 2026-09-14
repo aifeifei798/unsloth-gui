@@ -107,8 +107,9 @@
 `output` 回复列 →「生成统一训练数据」。生成后去「训练」Tab 点「🔄 刷新数据集列表」即可选中。
 
 统一格式为 `instruction / input / think / output` 四列，每个角色都可多选，
-多列按顺序换行拼成一段；没映射 input/think 就没有对应段落；
-空回复的行会自动丢弃并计数。产物在 `local_data/processed/<名称>/`
+多列按顺序换行拼成一段；没映射 input 就没有对应段落；
+最终训练文本恒为 Instruction / Input(可选) / Response，
+其中 Response = think + output 拼接；空回复的行会自动丢弃并计数。产物在 `local_data/processed/<名称>/`
 （`data.jsonl` + `hf_dataset/` + `manifest.json`），配置自动写入
 `datasets_config/`，不用手写 JSON。
 

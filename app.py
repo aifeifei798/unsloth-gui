@@ -19,7 +19,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
-from src.dataprep import generate_unified, inspect_text, persist_upload
+from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
 from src.inference_utils import (
     list_trained_loras,
@@ -221,6 +221,14 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
     )
 
 
+def _prep_preview_row(state, ins_cols, input_cols, think_cols, out_cols, fixed_ins):
+    try:
+        return preview_row(state or {}, ins_cols, input_cols, think_cols, out_cols,
+                           fixed_ins or "")
+    except Exception as e:
+        return f"❌ 预览失败: {e}"
+
+
 def _prep_generate(state, ins_cols, input_cols, think_cols, out_cols, fixed_ins, name,
                    progress=gr.Progress(track_tqdm=True)):
     try:
@@ -288,6 +296,7 @@ with gr.Blocks() as demo:
                         gr.Markdown(
                             "四个角色都可**多选**，多列按顺序换行拼成一段。"
                             "列名乱没关系，把意思一样的列都勾上就行。"
+                            "Response 固定为 think + output 拼接（不单独设 Thinking 段）。"
                         )
                         prep_ins_col = gr.Dropdown(
                             label="instruction 输入列（可多选）",
@@ -314,7 +323,9 @@ with gr.Blocks() as demo:
                             label="统一数据名称（必填，将出现在训练列表）",
                             placeholder="如 wukong_v1",
                         )
-                        prep_generate_btn = gr.Button("2. 生成统一训练数据", variant="primary")
+                        with gr.Row():
+                            prep_preview_btn = gr.Button("👁 预览这行训练数据", variant="secondary")
+                            prep_generate_btn = gr.Button("2. 生成统一训练数据", variant="primary")
                 with gr.Column(scale=2):
                     prep_inspect_output = gr.Textbox(
                         label="列信息与样本", interactive=False, lines=12, max_lines=25,
@@ -438,6 +449,12 @@ with gr.Blocks() as demo:
         inputs=[prep_source_radio, prep_upload, prep_hf_id, prep_hf_split, prep_existing],
         outputs=[prep_inspect_output, prep_state, prep_ins_col, prep_input_col,
                  prep_think_col, prep_out_col],
+    )
+    prep_preview_btn.click(
+        fn=_prep_preview_row,
+        inputs=[prep_state, prep_ins_col, prep_input_col, prep_think_col, prep_out_col,
+                prep_fixed_ins],
+        outputs=[prep_preview],
     )
     prep_generate_btn.click(
         fn=_prep_generate,
