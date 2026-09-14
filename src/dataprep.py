@@ -203,8 +203,10 @@ def _merge(row: dict, cols: list) -> str:
 
 def generate_unified(state: dict, instruction_cols, input_cols,
                      think_cols, output_cols, output_name: str,
-                     progress=None) -> tuple[str, str, str]:
-    """生成统一数据。四个角色都可多选。返回 (状态文本, 预览文本, 新数据集display_name)."""
+                     fixed_instruction: str = "", progress=None) -> tuple[str, str, str]:
+    """生成统一数据。四个角色都可多选；instruction 还支持手写固定文本
+   （数据里没有对应列时用它，所有行共用；同时映射了列则做前缀拼在前面）.
+    返回 (状态文本, 预览文本, 新数据集display_name)."""
     if not state or not state.get("columns"):
         raise ValueError("请先点「1. 读取列信息」。")
     cols = state["columns"]
@@ -218,8 +220,8 @@ def generate_unified(state: dict, instruction_cols, input_cols,
         for c in selected:
             if c not in cols:
                 raise ValueError(f"{ROLE_LABEL[role]}里有不存在的列 '{c}'，实际列: {cols}。")
-    if not mapping["instruction"]:
-        raise ValueError("请至少选择 1 列作为 instruction 输入。")
+    if not mapping["instruction"] and not (fixed_instruction or "").strip():
+        raise ValueError("instruction 没有映射任何列，请至少选择 1 列，或在「固定指令」里手写一句。")
     if not mapping["output"]:
         raise ValueError("请至少选择 1 列作为 output 回复。")
     seen: dict[str, str] = {}
@@ -265,13 +267,16 @@ def generate_unified(state: dict, instruction_cols, input_cols,
             pass
     rows: list[dict] = []
     dropped_empty = 0
+    fixed_ins = (fixed_instruction or "").strip()
     for row in ds:
         out = _merge(row, mapping["output"])
         if not out:
             dropped_empty += 1
             continue
+        ins_merged = _merge(row, mapping["instruction"])
+        instruction = f"{fixed_ins}\n{ins_merged}" if fixed_ins and ins_merged else (fixed_ins or ins_merged)
         rows.append({
-            "instruction": _merge(row, mapping["instruction"]),
+            "instruction": instruction,
             "input": _merge(row, mapping["input"]),
             "think": _merge(row, mapping["think"]),
             "output": out,
@@ -302,6 +307,7 @@ def generate_unified(state: dict, instruction_cols, input_cols,
         "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": {k: state.get(k) for k in ("kind", "hf_id", "split", "existing_name")},
         "mapping": mapping,
+        "fixed_instruction": fixed_ins or None,
         "rows_total": len(ds),
         "rows_kept": len(rows),
         "rows_dropped_empty_output": dropped_empty,

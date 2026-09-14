@@ -221,11 +221,12 @@ def _prep_inspect(kind, upload_path, hf_id, hf_split, existing_name,
     )
 
 
-def _prep_generate(state, ins_cols, input_cols, think_cols, out_cols, name,
+def _prep_generate(state, ins_cols, input_cols, think_cols, out_cols, fixed_ins, name,
                    progress=gr.Progress(track_tqdm=True)):
     try:
         status, preview, new_name = generate_unified(
-            state or {}, ins_cols, input_cols, think_cols, out_cols, name, progress=progress)
+            state or {}, ins_cols, input_cols, think_cols, out_cols, name,
+            fixed_instruction=fixed_ins or "", progress=progress)
     except Exception as e:
         return f"❌ 生成失败: {e}", "", gr.update(), gr.update()
     warns = _reload_datasets()
@@ -289,8 +290,13 @@ with gr.Blocks() as demo:
                             "列名乱没关系，把意思一样的列都勾上就行。"
                         )
                         prep_ins_col = gr.Dropdown(
-                            label="instruction 输入列（必填，可多选）",
+                            label="instruction 输入列（可多选）",
                             choices=[], multiselect=True,
+                        )
+                        prep_fixed_ins = gr.Textbox(
+                            label="固定指令（可选，手写）",
+                            placeholder="数据里没有 instruction 列就在这里写一句，所有行共用；同时选了列则做统一前缀拼在前面",
+                            lines=3,
                         )
                         prep_input_col = gr.Dropdown(
                             label="input 上下文列（可选，可多选）",
@@ -435,7 +441,8 @@ with gr.Blocks() as demo:
     )
     prep_generate_btn.click(
         fn=_prep_generate,
-        inputs=[prep_state, prep_ins_col, prep_input_col, prep_think_col, prep_out_col, prep_name],
+        inputs=[prep_state, prep_ins_col, prep_input_col, prep_think_col, prep_out_col,
+                prep_fixed_ins, prep_name],
         outputs=[prep_status, prep_preview, dataset_dropdown, prep_existing],
     )
     refresh_datasets_btn.click(
