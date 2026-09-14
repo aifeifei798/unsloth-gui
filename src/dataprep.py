@@ -47,8 +47,10 @@ def sanitize_name(name: str) -> str:
 
 
 def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
-                     local_path: str = "", existing: Optional[DatasetConfig] = None):
-    """按来源加载原始数据集（未格式化）. kind: upload | hf | existing."""
+                     local_path: str = "", existing: Optional[DatasetConfig] = None,
+                     streaming: bool = False):
+    """按来源加载原始数据集（未格式化）. kind: upload | hf | existing.
+    streaming=True 时远端走流式（只用于预览取行，不可 len()/索引）."""
     from datasets import load_dataset, load_from_disk
 
     if kind == "existing":
@@ -57,38 +59,38 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
         p = Path(existing.resolved_dataset_id())
         if p.exists():
             if p.is_dir():
-                ds = load_from_disk(str(p))
+                ds = load_from_disk(str(p))  # 本地落盘本来就快，不走流式
             elif p.suffix in (".jsonl", ".json"):
-                ds = load_dataset("json", data_files=str(p), split="train")
+                ds = load_dataset("json", data_files=str(p), split="train", streaming=streaming)
             elif p.suffix == ".csv":
-                ds = load_dataset("csv", data_files=str(p), split="train")
+                ds = load_dataset("csv", data_files=str(p), split="train", streaming=streaming)
             elif p.suffix in (".parquet",):
-                ds = load_dataset("parquet", data_files=str(p), split="train")
+                ds = load_dataset("parquet", data_files=str(p), split="train", streaming=streaming)
             elif p.suffix == ".txt":
-                ds = load_dataset("text", data_files=str(p), split="train")
+                ds = load_dataset("text", data_files=str(p), split="train", streaming=streaming)
             else:
                 raise ValueError(f"不支持的本地格式: {p}（支持目录/jsonl/json/csv/parquet/txt）")
         else:
             if existing.is_local:
                 raise FileNotFoundError(f"本地路径未找到: {p}")
-            ds = load_dataset(existing.dataset_id, split=existing.split)
+            ds = load_dataset(existing.dataset_id, split=existing.split, streaming=streaming)
     elif kind == "hf":
         hf_id = (hf_id or "").strip()
         if not hf_id:
             raise ValueError("请填写 HuggingFace 数据集 ID（如 yahma/alpaca-cleaned）。")
-        ds = load_dataset(hf_id, split=(split or "train").strip() or "train")
+        ds = load_dataset(hf_id, split=(split or "train").strip() or "train", streaming=streaming)
     elif kind == "upload":
         if not local_path or not Path(local_path).is_file():
             raise ValueError("请先上传文件（支持 .jsonl / .json / .csv / .parquet / .txt）。")
         p = Path(local_path)
         if p.suffix in (".jsonl", ".json"):
-            ds = load_dataset("json", data_files=str(p), split="train")
+            ds = load_dataset("json", data_files=str(p), split="train", streaming=streaming)
         elif p.suffix == ".csv":
-            ds = load_dataset("csv", data_files=str(p), split="train")
+            ds = load_dataset("csv", data_files=str(p), split="train", streaming=streaming)
         elif p.suffix == ".parquet":
-            ds = load_dataset("parquet", data_files=str(p), split="train")
+            ds = load_dataset("parquet", data_files=str(p), split="train", streaming=streaming)
         elif p.suffix == ".txt":
-            ds = load_dataset("text", data_files=str(p), split="train")
+            ds = load_dataset("text", data_files=str(p), split="train", streaming=streaming)
         else:
             raise ValueError(f"不支持的上传格式: {p.suffix}")
     else:
@@ -98,6 +100,36 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
         want = (split or "").strip()
         ds = ds[want] if want in ds else ds[list(ds.keys())[0]]
     return ds
+
+
+def peek_source(kind: str, hf_id: str = "", split: str = "train",
+                local_path: str = "", existing: Optional[DatasetConfig] = None,
+                ) -> tuple[list, Optional[dict], Optional[int], bool]:
+    """只取 1 行做映射预览：远端走 streaming 秒开（不下载全量），本地直接读。
+    返回 (列名, 首行|None, 总行数|None, 是否流式)。全量数据等点生成时再拉取。"""
+    split = (split or "train").strip() or "train"
+    remote = kind == "hf" or (
+        kind == "existing" and existing is not None
+        and not Path(existing.resolved_dataset_id()).exists()
+    )
+    if remote:
+        from datasets import load_dataset
+        ds_id = hf_id.strip() if kind == "hf" else existing.dataset_id
+        if not ds_id:
+            raise ValueError("请填写 HuggingFace 数据集 ID。")
+        ds = load_dataset(ds_id, split=split, streaming=True)
+        cols = list(ds.column_names or [])
+        try:
+            row = next(iter(ds))
+        except StopIteration:
+            row = None
+        if not cols and row:  # 流式下 column_names 可能为空，用首行 keys 兜底
+            cols = list(row.keys())
+        return cols, row, None, True
+    ds = load_raw_dataset(kind, hf_id, split, local_path, existing)
+    cols = list(ds.column_names)
+    row = ds[0] if len(ds) > 0 else None
+    return cols, row, len(ds), False
 
 
 def persist_upload(src_path: str) -> str:
@@ -111,25 +143,28 @@ def persist_upload(src_path: str) -> str:
 
 
 def inspect_text(kind: str, hf_id: str = "", split: str = "train",
-                 local_path: str = "", existing: Optional[DatasetConfig] = None,
-                 n_sample: int = 2) -> tuple[str, dict]:
-    """返回（展示文本， 状态dict供生成步骤复用）."""
-    ds = load_raw_dataset(kind, hf_id, split, local_path, existing)
-    cols = list(ds.column_names)
+                 local_path: str = "", existing: Optional[DatasetConfig] = None) -> tuple[str, dict]:
+    """只取 1 行预览列信息（远端流式秒开）；全量数据等生成时再拉取。"""
+    cols, row, n_rows, streamed = peek_source(kind, hf_id, split, local_path, existing)
+    if not cols:
+        raise ValueError("未能读到任何列，请检查来源与切分名。")
+    count_line = (f"总行数: 未知（流式预览，点生成时全量拉取）" if streamed
+                  else f"总行数: {n_rows}")
     lines = [
-        f"总行数: {len(ds)}",
+        count_line,
         f"列名 ({len(cols)}): {', '.join(cols)}",
         "-" * 60,
     ]
-    for i in range(min(n_sample, len(ds))):
-        row = ds[i]
+    if row is None:
+        lines.append("(空数据集，没有可预览的行)")
+    else:
         preview = {k: (str(v)[:300] + "…" if len(str(v)) > 300 else v) for k, v in row.items()}
-        lines.append(f"[第 {i+1} 行]\n" + json.dumps(preview, ensure_ascii=False, indent=1))
+        lines.append("[预览第 1 行]\n" + json.dumps(preview, ensure_ascii=False, indent=1))
         lines.append("-" * 60)
     state = {"kind": kind, "hf_id": hf_id, "split": split,
              "local_path": local_path,
              "existing_name": existing.display_name if existing else "",
-             "columns": cols, "n_rows": len(ds)}
+             "columns": cols, "n_rows": n_rows, "streamed": streamed}
     return "\n".join(lines), state
 
 
