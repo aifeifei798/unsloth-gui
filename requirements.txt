@@ -1,18 +1,31 @@
-xformers
-torch
+# 安装顺序很重要：先装 torch（含 CUDA），再装 unsloth，最后装其余。
+# 示例（CUDA 12.1）：
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+#   pip install -r requirements.txt
+#
+# 下面 pin 保证 新 TRL(SFTConfig/processing_class) 与旧版代码都能跑，
+# train_utils.py 会自动探测回退，所以放宽为区间而不是 ==。
+
+torch>=2.4,<2.9
 torchvision
 torchaudio
-transformers
-bitsandbytes
-accelerate
-trl
-triton
-cut_cross_entropy
-unsloth_zoo
-tensorboard
-gradio
+transformers>=4.45,<5.14
+datasets>=2.18,<4.0
+accelerate>=0.34
+peft>=0.12
+trl>=0.12,<0.27
+bitsandbytes>=0.43
+safetensors
 sentencepiece
 protobuf
 hf_transfer
-unsloth
+tensorboard
+gradio>=4.0,<6.0
 timm
+xformers
+cut_cross_entropy
+unsloth_zoo
+# unsloth 本体请按官方文档单独安装（与 torch/CUDA 强绑定），不要在这里 pin：
+# https://docs.unsloth.ai/get-started/installation
+# unsloth

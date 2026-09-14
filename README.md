@@ -1,5 +1,9 @@
 # 🚀 Unsloth GUI Trainer: 一个专业的交互式微调工作台
 
+> v4.0（轻量专属路线，不跟 Unsloth Studio 比大而全）：单文件拆为 `src/` 模块、
+> 训练可取消、TRL 新旧 API 兼容、数据集校验+预览、推理显存管理、TB 端口探测。
+> 旧 `python app.py` 依然可用，新启动参数见下文。
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -50,9 +54,14 @@
     # 在 Windows 上，使用: venv\Scripts\activate
     ```
 
-3.  **安装依赖**
-    项目所需的所用库都已在 `requirements.txt` 文件中列出。
+3.  **安装依赖（顺序很重要）**
     ```bash
+    # 先装 torch（按你的 CUDA 版本二选一）
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    # 再按官方文档装 unsloth（与 torch/CUDA 强绑定）
+    # https://docs.unsloth.ai/get-started/installation
+    pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+    # 最后装其余
     pip install -r requirements.txt
     ```
 
@@ -146,9 +155,14 @@ hf数据
 
 ```bash
 python app.py
+# 可选参数：--host 127.0.0.1 --port 7860 --tb-port 6006 --share
+# 默认不开启公网 share（安全），需要时加 --share 或 GRADIO_SHARE=1
+python app.py --host 0.0.0.0 --port 7860
 ```
 
-应用将在后台启动 TensorBoard，并提供一个本地 Gradio 网址 (如 `http://127.0.0.1:7860`) 和一个公共分享网址。在浏览器中打开任意一个即可开始使用。
+应用将在后台启动 TensorBoard（端口被占会自动顺延），并提供本地 Gradio 网址
+(如 `http://127.0.0.1:7860`)。新版训练支持“停止训练”安全中断、
+数据集预览、截断条数可调、推理参数可调、LoRA 列表刷新与模型卸载。
 
 ---
 

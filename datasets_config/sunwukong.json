@@ -1,8 +1,7 @@
 {
   "display_name": "孙悟空角色扮演 (示例)",
-  "dataset_id": "./local_data/sunwukong_style_100_for_gui",
+  "dataset_id": "./local_data/sunwukong_style_100.jsonl",
   "is_local": true,
-  "use_full_dataset": true,
   "prompt_template": "### User:\n{instruction}\n\n### Assistant:\n{output}",
   "input_columns": {
     "instruction": "instruction",

@@ -39,3 +39,14 @@ Thumbs.db  # Windows
 # 6.忽略unsloth_compiled_cache
 unsloth_compiled_cache/
 .gradio/
+
+# 7. 忽略 datasets 落盘缓存与 arrow 二进制（可用 jsonl/csv 重新生成）
+*.arrow
+local_data/*_for_gui/
+local_data/dataset_info.json
+local_data/state.json
+.cache/
+*.safetensors
+*.bin
+wandb/
+.no_cache/
