@@ -1,6 +1,6 @@
 """极简 i18n：locales/{lang}.json，扁平 key-value。
 
-- 进程默认语言用 `set_lang()`（Gradio 旧入口在启动时调用）。
+- 进程默认语言用 `set_lang()`（CLI / 非 Web 调用方可用）。
 - Web 入口用 `language(lang)` 上下文覆盖当前请求语言，不重启进程、互不影响。
 - 缺键回退中文，中文再缺回退 key 本身（永不炸）。
 - 带 {param} 占位，format 失败原样返回。
@@ -30,7 +30,7 @@ def normalize_lang(lang: str | None) -> str:
 
 
 def set_lang(lang: str) -> str:
-    """设置进程默认语言（旧 Gradio 入口使用）。"""
+    """设置进程默认语言（Web 之外的调用方使用）。"""
     global _DEFAULT_LANG
     _DEFAULT_LANG = normalize_lang(lang)
     return _DEFAULT_LANG

@@ -10,8 +10,7 @@
 unsloth
 bitsandbytes>=0.43
 
-# --- 本项目直接用的：UI / 监控 / 下载加速 / 魔搭 ---
-gradio>=6.27
+# --- 本项目直接用的：监控 / 下载加速 / 魔搭 ---
 tensorboard
 hf_transfer
 modelscope

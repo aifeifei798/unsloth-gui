@@ -10,8 +10,8 @@ A FastAPI + Jinja2 + [Unsloth](https://github.com/unslothai/unsloth) GUI for fin
 focused on **single-GPU text SFT**: model management, data prep, training,
 monitoring and chat on one page — no code, no hand-edited configs.
 
-> The new web UI runs at `http://127.0.0.1:7861`; language switching is instant and
-> needs no restart. The old Gradio UI is kept temporarily at `7860`.
+> The web UI runs at `http://127.0.0.1:7861`; language switching is instant and
+> needs no restart.
 > This is a single-user local tool with **no authentication** — do not expose it
 > directly to the public internet.
 >
@@ -71,11 +71,7 @@ prepare data — training and inference will report missing dependencies.
 ## ▶️ Run
 
 ```bash
-# New web UI
 python -m web --port 7861
-
-# Legacy Gradio UI (temporary)
-python app.py --port 7860
 ```
 
 Open `http://127.0.0.1:7861`. Flow: add a model in Models →
@@ -96,7 +92,6 @@ The chat page reads the prompt template, `seq_len` and base-model info from
 ## 📁 Layout
 
 ```
-app.py                  # legacy Gradio UI layer (temporary)
 web/                    # FastAPI + Jinja2 web layer
   main.py               # app entry, language middleware, page routes
   jobs.py               # background jobs + SSE (training/data prep)

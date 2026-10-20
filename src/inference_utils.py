@@ -326,28 +326,6 @@ def stream_chat(user_input: str, history: Optional[list], system_prompt: str,
         _gen_lock.release()
 
 
-def run_chat(user_input: str, history: Optional[list], system_prompt: str,
-             max_new_tokens: int = 256, temperature: float = 0.7,
-             top_p: float = 0.95, top_k: int = 40) -> Generator[list, None, None]:
-    """兼容旧 Gradio 的接口：yield 完整的 OpenAI 式 history."""
-    history = list(history or [])
-    if not (user_input or "").strip():
-        yield history
-        return
-    history = history + [
-        {"role": "user", "content": user_input},
-        {"role": "assistant", "content": ""},
-    ]
-    try:
-        for piece in stream_chat(user_input, history[:-2], system_prompt,
-                                 max_new_tokens, temperature, top_p, top_k):
-            history[-1]["content"] += piece
-            yield history
-    except Exception as e:
-        history[-1]["content"] = str(e)
-        yield history
-
-
 def load_inference_model(base_model_name: str, lora_name: str, progress=None) -> str:
     if not base_model_name or not lora_name:
         return t("inf.need_both")

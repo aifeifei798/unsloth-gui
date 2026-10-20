@@ -12,6 +12,6 @@ RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
 
 COPY . .
 
-EXPOSE 7860 6006
-ENV GRADIO_HOST=0.0.0.0 GRADIO_PORT=7860 TB_PORT=6006
-CMD ["python3", "app.py", "--host", "0.0.0.0", "--port", "7860"]
+EXPOSE 7861 6006
+ENV UNSLOTH_WEB_HOST=0.0.0.0 UNSLOTH_WEB_PORT=7861
+CMD ["python3", "-m", "web", "--host", "0.0.0.0", "--port", "7861"]

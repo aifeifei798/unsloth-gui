@@ -230,19 +230,6 @@ def delete_entry_strict(name: str) -> dict:
     return {"name": name, "config_file": fp.name, "removed_dirs": removed_dirs}
 
 
-def delete_entry(name: str) -> str:
-    """旧 Gradio 入口用：成功/失败都返回可展示文本，错误以 ❌ 开头。"""
-    try:
-        info = delete_entry_strict(name)
-    except Exception as e:
-        return t("dm.err.delete_failed", err=e)
-    removed = [t("dm.del.config", file=info["config_file"])]
-    if info["removed_dirs"]:
-        removed.append(t("dm.del.artifact", dir=info["removed_dirs"][0]))
-    kept = "" if info["removed_dirs"] else t("dm.del.kept")
-    return t("dm.deleted", name=name, parts=" + ".join(removed), kept=kept).strip()
-
-
 def rename_entry(old: str, new: str) -> str:
     """返回新展示名。产物目录跟着搬家，配置与 manifest 同步更新。"""
     new = sanitize_name(new)

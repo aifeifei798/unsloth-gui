@@ -6,14 +6,12 @@
 
 基于 FastAPI + Jinja2 + 原生 JS + DaisyUI 的轻量**纯文本单卡 SFT** 图形工作台
 （文本训练 only，图片/视频/音频不做）。五个页面：模型管理 / 数据管理 / 数据处理 /
-训练 / 测试。旧 Gradio 界面（`app.py`）过渡期暂时保留，两套 UI 共用 `src/` 领域层。
-界面中英双语，文案全在 `locales/*.json`；Web 用 Cookie + `ContextVar` 请求级切换语言，
-不重启进程。
+训练 / 测试。界面中英双语，文案全在 `locales/*.json`；Web 用 Cookie + `ContextVar`
+请求级切换语言，不重启进程。
 
 ## 目录
 
 ```
-app.py                 # 旧 Gradio UI（过渡期保留，稳定后删除）
 web/
   main.py              # FastAPI 入口、语言中间件、页面路由、异常格式、静态挂载
   deps.py / errors.py  # 依赖、AppError
@@ -56,25 +54,22 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
    Web 模板由 Jinja 注入 `window.I18N`，前端 JS 一律用 `t('key')`，不要硬编码中文。
 5. **重型依赖延迟导入**：`torch / unsloth / trl / transformers / datasets / peft`
    只许在函数内 import，模块顶层保持 stdlib-only（UI 无 GPU 也能打开）。
-6. **Gradio 过渡期**：`app.py` 仍在用；改 `src/` 时必须保证 Web 与 Gradio 两套入口都不破。
-   Gradio 事件输出元数必须与 handler 返回元组长度一致；`select` 事件参数必须标
-   `evt: gr.SelectData` 注解，否则 6.x 报 warning。
-7. **删数据只删生成物**：`local_data/processed/<name>/` + 对应 config JSON；
+6. **删数据只删生成物**：`local_data/processed/<name>/` + 对应 config JSON；
    原始上传、自带示例永远不动。删模型至少保留一个。
-8. **配置文件原子写**：统一走 `src/storage.py` 的 tmp + replace。
-9. **Web 单进程单 worker**：训练与推理互斥，不要引入多 worker / 多进程共享显存；
+7. **配置文件原子写**：统一走 `src/storage.py` 的 tmp + replace。
+8. **Web 单进程单 worker**：训练与推理互斥，不要引入多 worker / 多进程共享显存；
    后台任务统一走 `web/jobs.py`，训练和数据生成进度用 SSE，聊天用 WebSocket。
-10. **Web 职责边界**：路由只做校验、参数转换、调用 `src/`；领域逻辑不要写进
-    `web/routers/`，也不要复制一份到前端 JS。前端不引入 React/Vue，不需要 Node 构建。
-11. **SSE/WS 约定**：事件名固定为 `state / progress / log / metrics / done / error /
+9. **Web 职责边界**：路由只做校验、参数转换、调用 `src/`；领域逻辑不要写进
+   `web/routers/`，也不要复制一份到前端 JS。前端不引入 React/Vue，不需要 Node 构建。
+10. **SSE/WS 约定**：事件名固定为 `state / progress / log / metrics / done / error /
     cancelled / end`；任务结束前必须发 `done` 或 `error`/`cancelled`，最后发 `end`。
     晚订阅/重连要能从 `job.events` 补发，`Last-Event-ID` 语义不要破坏。
 
 ## 改完必须跑（本机无 GPU，所有验证都不需要 torch）
 
 ```bash
-# 1. 全量语法检查（Web + Gradio + 领域层）
-python3 -m py_compile app.py src/*.py web/*.py web/routers/*.py
+# 1. 全量语法检查（Web + 领域层）
+python3 -m py_compile src/*.py web/*.py web/routers/*.py
 
 # 2. Web 入口能构建（在装好 requirements-web.txt 的 venv 里）
 python -c "from web.main import app"
@@ -84,14 +79,9 @@ pytest -q tests/
 
 # 4. 文案对齐
 python3 -c "from src.i18n import check_parity; assert check_parity()[0]"
-```
 
-有 gradio 的 venv 里再补跑（旧界面的回归）：
-
-```bash
-python -m pyflakes app.py src/*.py                         # 必须 0
-python -W error::UserWarning -c "import app"               # 零警告构建
-UNSLOTH_GUI_LANG=en python -W error::UserWarning -c "import app"
+# 5. 静态检查（装好 pyflakes 时；必须 0）
+python -m pyflakes src/*.py web/*.py web/routers/*
 ```
 
 新 Web 层改动建议补一条真实服务冒烟：

@@ -235,22 +235,6 @@ def _warn(warnings: list[str] | None, message: str) -> None:
         warnings.append(message)
 
 
-def safe_load_configs() -> tuple[list[ModelConfig], list[DatasetConfig], list[str]]:
-    """UI 启动时调用：失败也不抛异常，返回 warnings 供界面展示."""
-    warnings: list[str] = []
-    try:
-        models = load_models_config()
-    except Exception as e:
-        warnings.append(t("warn.models", err=e))
-        models = []
-    try:
-        datasets = load_datasets_config(warnings=warnings)
-    except Exception as e:
-        warnings.append(t("warn.datasets", err=e))
-        datasets = []
-    return models, datasets, warnings
-
-
 def find_by_name(items: list, name: str) -> Optional[Any]:
     for it in items:
         if getattr(it, "display_name", None) == name:
