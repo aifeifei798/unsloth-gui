@@ -1,32 +1,9 @@
 [
   {
-    "display_name": "Llama-3 8B Instruct (4-bit)",
-    "model_id": "unsloth/llama-3-8b-instruct-bnb-4bit",
+    "display_name": "Qwen3.5 0.8B",
+    "model_id": "Qwen/Qwen3.5-0.8B",
     "load_in_4bit": true,
-    "dtype": null
-  },
-  {
-    "display_name": "Phi-3 Mini 4k Instruct (bf16)",
-    "model_id": "unsloth/phi-3-mini-4k-instruct",
-    "load_in_4bit": false,
-    "dtype": "bfloat16"
-  },
-  {
-    "display_name": "Gemma-3 1B (Google 极致性能版)",
-    "model_id": "unsloth/gemma-3-1b-it-qat-unsloth-bnb-4bit",
-    "load_in_4bit": true,
-    "dtype": null
-  },
-  {
-    "display_name": "Gemma-3 4B (Google 极致性能版)",
-    "model_id": "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit",
-    "load_in_4bit": true,
-    "dtype": null
-  },
-  {
-    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
-    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized",
-    "load_in_4bit": true,
-    "dtype": null
+    "dtype": null,
+    "max_seq_length": 2048
   }
 ]
