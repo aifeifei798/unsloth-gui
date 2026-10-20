@@ -7,8 +7,17 @@
   </div>
 </div>
 
-<div class="grid-2">
-  <div class="stack">
+<div role="tablist" class="tabs tabs-box mb-3" id="prep-tabs">
+  <button type="button" role="tab" class="tab tab-active" data-tab="source">
+    {{ t('p.tab.source') }}
+  </button>
+  <button type="button" role="tab" class="tab" data-tab="mapping">
+    {{ t('p.tab.mapping') }}
+  </button>
+</div>
+
+<div id="prep-panel-source" role="tabpanel">
+  <div class="grid-2">
     <section class="card bg-base-100 shadow-sm">
       <div class="card-body stack">
         <h2 class="card-title text-base">{{ t('p.src_acc') }}</h2>
@@ -59,6 +68,17 @@
     </section>
 
     <section class="card bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-base">{{ t('p.inspect_out') }}</h2>
+        <pre id="prep-inspect-out" class="pre">{{ t('web.prepare.inspect_hint') }}</pre>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="prep-panel-mapping" role="tabpanel" class="hidden">
+  <div class="grid-2">
+    <section class="card bg-base-100 shadow-sm">
       <div class="card-body stack">
         <h2 class="card-title text-base">{{ t('p.map_acc') }}</h2>
         <p class="muted">{{ t('p.map_hint')|replace('**', '') }}</p>
@@ -102,33 +122,26 @@
         </div>
       </div>
     </section>
-  </div>
 
-  <div class="stack">
-    <section class="card bg-base-100 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title text-base">{{ t('p.inspect_out') }}</h2>
-        <pre id="prep-inspect-out" class="pre">{{ t('web.prepare.inspect_hint') }}</pre>
-      </div>
-    </section>
+    <div class="stack">
+      <section class="card bg-base-100 shadow-sm">
+        <div class="card-body stack">
+          <h2 class="card-title text-base">{{ t('p.status') }}</h2>
+          <progress id="prep-progress" class="progress progress-primary w-full"
+                    value="0" max="100"></progress>
+          <div id="prep-status" class="alert hidden"></div>
+          <pre id="prep-log" class="pre log-box"></pre>
+        </div>
+      </section>
 
-    <section class="card bg-base-100 shadow-sm">
-      <div class="card-body stack">
-        <h2 class="card-title text-base">{{ t('p.status') }}</h2>
-        <progress id="prep-progress" class="progress progress-primary w-full"
-                  value="0" max="100"></progress>
-        <div id="prep-status" class="alert hidden"></div>
-        <pre id="prep-log" class="pre log-box"></pre>
-      </div>
-    </section>
-
-    <section class="card bg-base-100 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title text-base">{{ t('p.preview') }}</h2>
-        <p class="muted">{{ t('p.preview_hint') }}</p>
-        <pre id="prep-preview-out" class="pre"></pre>
-      </div>
-    </section>
+      <section class="card bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">{{ t('p.preview') }}</h2>
+          <p class="muted">{{ t('p.preview_hint') }}</p>
+          <pre id="prep-preview-out" class="pre"></pre>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 {% endblock %}

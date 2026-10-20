@@ -1,12 +1,20 @@
 (function () {
   const { api, t, toast, showStatus, hide, setButtonBusy, watchJob,
-          formatBytes, escapeHtml, qs } = window.UG;
+          formatBytes, escapeHtml, qs, qsa } = window.UG;
 
   let uploadId = null;
   let token = null;
   let columns = [];
   let jobId = null;
   let watcher = null;
+
+  function selectTab(name) {
+    qsa('#prep-tabs [data-tab]').forEach((btn) => {
+      btn.classList.toggle('tab-active', btn.dataset.tab === name);
+    });
+    qs('#prep-panel-source').classList.toggle('hidden', name !== 'source');
+    qs('#prep-panel-mapping').classList.toggle('hidden', name !== 'mapping');
+  }
 
   function renderMulti(el, cols, selected) {
     if (!el) return;
@@ -111,6 +119,8 @@
       if (!qs('#prep-name').value) {
         qs('#prep-name').value = 'dataset_' + new Date().toISOString().slice(0, 10).replace(/-/g, '');
       }
+      selectTab('mapping');
+      toast(t('web.prepare.to_mapping'), 'success');
     } catch (e) {
       token = null;
       setMappingEnabled(false);
@@ -227,6 +237,10 @@
   qs('#prep-preview').addEventListener('click', preview);
   qs('#prep-generate').addEventListener('click', generate);
   qs('#prep-cancel').addEventListener('click', cancel);
+  qsa('#prep-tabs [data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => selectTab(btn.dataset.tab));
+  });
   sourceChanged();
+  selectTab('source');
   loadExisting();
 })();
