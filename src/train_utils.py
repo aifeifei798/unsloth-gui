@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
-from .model_utils import configure_hf_transfer, unwrap_text_tokenizer
+from .model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
 from .paths import LOGS_PARENT_DIR, OUTPUTS_PARENT_DIR
 from .storage import atomic_write_json
 
@@ -285,6 +285,8 @@ def run_training(req: TrainRequest, progress=None,
     _external_cancel = cancel_event
     output_dir = OUTPUTS_PARENT_DIR / exp
     logging_dir = LOGS_PARENT_DIR / exp
+    # 数据集/模型都要走网络，先把 httpx 认不出的代理变量清掉
+    sanitize_proxy_env()
 
     def _cancelled() -> bool:
         return (_cancel_event.is_set()
@@ -372,6 +374,7 @@ def run_training(req: TrainRequest, progress=None,
         except Exception:
             pass
         configure_hf_transfer(bool(model_cfg.fast_download))
+        sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
         import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
         from unsloth import FastLanguageModel
 

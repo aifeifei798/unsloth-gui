@@ -31,6 +31,7 @@ from uuid import uuid4
 
 from .config import SCHEMA_VERSION, DatasetConfig, find_by_name, load_datasets_config
 from .dataset_utils import drop_empty_sections
+from .model_utils import sanitize_proxy_env
 from .i18n import t
 from .paths import DATASETS_CONFIG_DIR, PROCESSED_ROOT, UPLOAD_ROOT
 from .storage import atomic_write_json
@@ -78,6 +79,7 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
     """按来源加载原始数据集（未格式化）. kind: upload | hf | existing."""
     from datasets import load_dataset, load_from_disk
 
+    sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
     if kind == "existing":
         if existing is None:
             raise ValueError(t("dp.err.no_config"))
@@ -211,6 +213,7 @@ def peek_source(kind: str, hf_id: str = "", split: str = "train",
                 ) -> tuple[list, Optional[dict], Optional[int], bool]:
     """只取 1 行做映射预览：远端走 streaming 秒开，本地文件只读头部。
     返回 (列名, 首行|None, 总行数|None, 是否流式)。"""
+    sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
     if kind == "existing" and existing is not None:
         split = (existing.split or "train").strip() or "train"
     else:

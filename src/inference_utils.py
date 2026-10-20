@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
-from .model_utils import configure_hf_transfer, unwrap_text_tokenizer
+from .model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
 from .paths import OUTPUTS_PARENT_DIR
 
 _mgr_lock = threading.Lock()
@@ -413,6 +413,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
     from .config import ensure_local_model, find_by_name, load_models_config
     from .train_utils import is_training
 
+    sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
     if is_training():
         return t("inf.training_busy")
 
@@ -470,6 +471,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 except Exception:
                     pass
             configure_hf_transfer(bool(model_cfg.fast_download))
+            sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
             import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
             from unsloth import FastLanguageModel
 

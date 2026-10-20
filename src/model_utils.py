@@ -1,7 +1,39 @@
 """模型加载小工具（保持 stdlib-only，不导入 torch/transformers）。"""
 from __future__ import annotations
 
+import importlib.util
 import os
+
+
+def _socksio_available() -> bool:
+    try:
+        return importlib.util.find_spec("socksio") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def sanitize_proxy_env() -> list[str]:
+    """清掉 httpx 认不出的代理变量，返回被清掉的 "名字=值" 列表。
+
+    常见环境是 `ALL_PROXY=socks://127.0.0.1:10808` + `http_proxy=http://...`。
+    httpx 只认 http/https/socks5/socks5h，遇到 `socks://` 直接抛
+    "Unknown scheme for proxy URL"，huggingface_hub 随即整个下载失败。
+    这里把不认的 all_proxy 删掉，剩下的 http_proxy/https_proxy 照常生效
+    （httpx 对具体协议的代理优先于 all:// 通配）。
+    """
+    removed: list[str] = []
+    for name in ("ALL_PROXY", "all_proxy"):
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            continue
+        scheme = raw.split("://", 1)[0].lower() if "://" in raw else ""
+        if scheme in ("http", "https"):
+            continue
+        if scheme in ("socks5", "socks5h") and _socksio_available():
+            continue
+        os.environ.pop(name, None)
+        removed.append(f"{name}={raw}")
+    return removed
 
 
 def configure_hf_transfer(enabled: bool) -> None:

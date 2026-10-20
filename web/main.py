@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.i18n import dictionary, get_lang, language, normalize_lang, t
+from src.model_utils import sanitize_proxy_env
 from src.paths import ensure_runtime_dirs
 from src.tb_utils import stop_tensorboard
 
@@ -32,6 +33,10 @@ templates.env.globals.update(t=t, get_lang=get_lang, version=__version__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_runtime_dirs()
+    # 环境里常有 httpx 认不出的 socks:// 代理，下载模型会直接报错，这里先清掉
+    dropped = sanitize_proxy_env()
+    if dropped:
+        print("[proxy] 已忽略不兼容的代理变量: " + ", ".join(dropped))
     job_manager.bind_loop()
     yield
     stop_tensorboard()

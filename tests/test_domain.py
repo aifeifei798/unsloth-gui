@@ -20,7 +20,7 @@ from src.dataset_utils import (
 )
 from src.i18n import check_parity
 from src.inference_utils import _build_chat_prompt, _headers_from_template, _render_prompt
-from src.model_utils import configure_hf_transfer, unwrap_text_tokenizer
+from src.model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
 
 
 def test_schema_version_is_three():
@@ -177,6 +177,25 @@ def test_configure_hf_transfer(monkeypatch):
     assert os.environ["HF_HUB_ENABLE_HF_TRANSFER"] == "0"
     configure_hf_transfer(True)
     assert os.environ["HF_HUB_ENABLE_HF_TRANSFER"] == "1"
+
+
+def test_sanitize_proxy_env_drops_unsupported_scheme(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:10808")
+    monkeypatch.setenv("all_proxy", "socks://127.0.0.1:10808")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:10808")
+    dropped = sanitize_proxy_env()
+    assert dropped, "socks:// 不该被 httpx 使用，必须清掉"
+    assert "ALL_PROXY" not in os.environ
+    assert "all_proxy" not in os.environ
+    # http_proxy 得留着，httpx 靠它走代理
+    assert os.environ["http_proxy"] == "http://127.0.0.1:10808"
+
+
+def test_sanitize_proxy_env_keeps_http_proxy(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:10808")
+    monkeypatch.delenv("all_proxy", raising=False)
+    assert sanitize_proxy_env() == []
+    assert os.environ["ALL_PROXY"] == "http://127.0.0.1:10808"
 
 
 def test_unwrap_text_tokenizer_from_processor():
