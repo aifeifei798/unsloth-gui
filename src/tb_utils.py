@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import atexit
+import os
+import shutil
 import socket
 import subprocess
+import sys
+from pathlib import Path
 from typing import Optional
 
 from .i18n import t
@@ -11,6 +15,22 @@ from .paths import LOGS_PARENT_DIR
 
 _PROC: Optional[subprocess.Popen] = None
 _PORT: int = 6006
+
+
+def _tb_command() -> list[str]:
+    """定位 tensorboard 的启动命令。
+
+    服务是用 venv 的 python 直接起的（不激活 venv），PATH 里通常没有
+    venv/bin，所以直接找 "tensorboard" 会 FileNotFoundError。这里依次尝试：
+    当前解释器同目录 → PATH → `python -m tensorboard.main`（最稳，不依赖 PATH）。
+    """
+    exe = Path(sys.executable).with_name("tensorboard")
+    if exe.is_file() and os.access(exe, os.X_OK):
+        return [str(exe)]
+    found = shutil.which("tensorboard")
+    if found:
+        return [found]
+    return [sys.executable, "-m", "tensorboard.main"]
 
 
 def _port_in_use(port: int) -> bool:
@@ -39,8 +59,8 @@ def launch_tensorboard(port: int = 6006) -> tuple[bool, str, int]:
     free = _find_free_port(port)
     try:
         _PROC = subprocess.Popen(
-            ["tensorboard", "--logdir", str(LOGS_PARENT_DIR),
-             "--host", "127.0.0.1", "--port", str(free)],
+            _tb_command() + ["--logdir", str(LOGS_PARENT_DIR),
+                             "--host", "127.0.0.1", "--port", str(free)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except FileNotFoundError:

@@ -253,7 +253,7 @@
   "inf.not_loaded": "No model loaded.",
   "inf.status_loaded": "Loaded: base={base} + lora={lora}",
   "inf.model_missing": "Error: no model loaded. Load one first.",
-  "tb.no_bin": "tensorboard binary not found. pip install tensorboard.",
+  "tb.no_bin": "tensorboard binary not found. Run ./install.sh (it installs tensorboard by default).",
   "tb.fail": "TensorBoard failed to start: {err}",
   "tb.running": "TensorBoard already running (:{port})",
   "tb.reused": "Port {port} busy, reusing existing TensorBoard.",

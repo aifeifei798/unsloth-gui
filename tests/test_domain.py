@@ -179,6 +179,19 @@ def test_configure_hf_transfer(monkeypatch):
     assert os.environ["HF_HUB_ENABLE_HF_TRANSFER"] == "1"
 
 
+def test_tb_command_resolves_tensorboard():
+    import sys
+
+    from src.tb_utils import _tb_command
+
+    cmd = _tb_command()
+    assert isinstance(cmd, list) and cmd
+    # 有 venv/bin/tensorboard 就用它，否则退到 python -m tensorboard.main
+    assert cmd[0].endswith("tensorboard") or cmd[0] == sys.executable
+    if cmd[0] == sys.executable:
+        assert cmd[1:3] == ["-m", "tensorboard.main"]
+
+
 def test_sanitize_proxy_env_drops_unsupported_scheme(monkeypatch):
     monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:10808")
     monkeypatch.setenv("all_proxy", "socks://127.0.0.1:10808")

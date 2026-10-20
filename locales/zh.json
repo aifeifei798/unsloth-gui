@@ -253,7 +253,7 @@
   "inf.not_loaded": "未加载模型。",
   "inf.status_loaded": "已加载: base={base} + lora={lora}",
   "inf.model_missing": "错误：模型未加载。请先选择并加载一个模型。",
-  "tb.no_bin": "未找到 tensorboard 可执行文件，请 pip install tensorboard。",
+  "tb.no_bin": "未找到 tensorboard 可执行文件，请运行 ./install.sh 安装（默认会装 tensorboard）。",
   "tb.fail": "TensorBoard 启动失败: {err}",
   "tb.running": "TensorBoard 已在运行 (:{port})",
   "tb.reused": "端口 {port} 已被占用，复用现有 TensorBoard。",

@@ -11,6 +11,6 @@ unsloth
 bitsandbytes>=0.43
 
 # --- 本项目直接用的：监控 / 下载加速 / 魔搭 ---
-tensorboard
+tensorboard        # requirements-web.txt 里也有一份，两种安装方式都带
 hf_transfer
 modelscope
