@@ -114,7 +114,11 @@ body {
 }
 .col { display: flex; flex-direction: column; gap: 0.75rem; }
 .col-tight { display: flex; flex-direction: column; gap: 0.35rem; }
-.stack > * + * { margin-top: 0.75rem; }
+/* DaisyUI 自带的 .stack 是「图片叠放」网格组件（子元素会重叠在同一格），
+   本项目只拿它当竖排容器用，这里覆盖成 flex 竖排。
+   card-body.stack 原本是 gap .5rem + margin .75rem，这里保持同样的 1.25rem 间距。 */
+.stack { display: flex; flex-direction: column; gap: 0.75rem; }
+.card-body.stack { gap: 1.25rem; }
 
 .card { border-radius: var(--app-radius); }
 .card-body { padding: 1rem; }

@@ -29,12 +29,53 @@
       .map((x) => x.value);
   }
 
+  // 按列名猜角色：先精确匹配，再包含匹配；猜不到再退回「第一列 / 最后一列」
+  const ROLE_HINTS = {
+    instruction: ['instruction', 'instruct', 'prompt', 'question', 'query', '问题', '指令'],
+    input: ['input', 'context', 'passage', 'document', '输入', '上下文', '背景'],
+    think: ['think', 'thinking', 'reasoning', 'rationale', '思考', '思维链'],
+    output: ['output', 'response', 'answer', 'completion', 'reply', '回答', '回复', '答案'],
+  };
+
+  function pickColumn(cols, role) {
+    const hints = ROLE_HINTS[role] || [];
+    const lowered = cols.map((c) => [c, String(c).toLowerCase()]);
+    for (const h of hints) {
+      const hit = lowered.find(([, low]) => low === h);
+      if (hit) return hit[0];
+    }
+    for (const h of hints) {
+      const hit = lowered.find(([, low]) => low.includes(h));
+      if (hit) return hit[0];
+    }
+    return null;
+  }
+
   function renderColumns(cols) {
     columns = cols || [];
-    renderMulti(qs('#prep-ins'), columns, columns.length ? [columns[0]] : []);
-    renderMulti(qs('#prep-input'), columns, []);
+    const used = new Set();
+    const take = (role) => {
+      const c = pickColumn(columns, role);
+      if (!c || used.has(c)) return null;
+      used.add(c);
+      return c;
+    };
+    let ins = take('instruction');
+    if (!ins) {
+      ins = columns.find((c) => !used.has(c)) || null;
+      if (ins) used.add(ins);
+    }
+    let out = take('output');
+    if (!out) {
+      out = columns.slice().reverse().find((c) => !used.has(c)) || null;
+      if (out) used.add(out);
+    }
+    const inp = take('input');
+    // think 不自动勾：统一数据的 output 列里已经含 think，勾了会重复拼接
+    renderMulti(qs('#prep-ins'), columns, ins ? [ins] : []);
+    renderMulti(qs('#prep-input'), columns, inp ? [inp] : []);
     renderMulti(qs('#prep-think'), columns, []);
-    renderMulti(qs('#prep-out'), columns, columns.length ? [columns[columns.length - 1]] : []);
+    renderMulti(qs('#prep-out'), columns, out ? [out] : []);
   }
 
   function setMappingEnabled(on) {
@@ -137,6 +178,14 @@
     return body;
   }
 
+  function showPreview(text) {
+    qs('#prep-preview-out').textContent = text;
+    const card = qs('#prep-preview-card');
+    if (card && card.scrollIntoView) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
   async function preview() {
     if (!token) { toast(t('dp.err.no_state'), 'warn'); return; }
     const btn = qs('#prep-preview');
@@ -145,7 +194,8 @@
       const res = await api('/api/prepare/preview', {
         method: 'POST', body: mappingBody(false),
       });
-      qs('#prep-preview-out').textContent = res.data.preview;
+      showPreview(res.data.preview);
+      toast(t('web.prepare.previewed'), 'success');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -194,7 +244,7 @@
           const result = data.result || {};
           qs('#prep-progress').value = 100;
           showStatus(qs('#prep-status'), result.status || t('web.job_done'), 'success');
-          if (result.preview) qs('#prep-preview-out').textContent = result.preview;
+          if (result.preview) showPreview(result.preview);
           toast(result.status || t('web.job_done'), 'success');
           loadExisting();
         },

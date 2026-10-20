@@ -348,6 +348,7 @@
   "web.prepare.uploaded": "Upload complete",
   "web.prepare.columns": "Read {n} columns; mapping is ready",
   "web.prepare.to_mapping": "Switched to Map & Generate — pick the roles, then generate",
+  "web.prepare.previewed": "Preview updated (see below)",
   "web.prepare.inspect_first": "Inspect columns first",
   "web.job_running": "Job running…",
   "web.job_done": "Job finished",

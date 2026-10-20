@@ -78,50 +78,60 @@
 
 <div id="prep-panel-mapping" role="tabpanel" data-panel="mapping" class="hidden">
   <div class="grid-2">
-    <section class="card bg-base-100 shadow-sm">
-      <div class="card-body stack">
-        <h2 class="card-title text-base">{{ t('p.map_acc') }}</h2>
-        <p class="muted">{{ t('p.map_hint')|replace('**', '') }}</p>
+    <div class="stack">
+      <section class="card bg-base-100 shadow-sm">
+        <div class="card-body stack">
+          <h2 class="card-title text-base">{{ t('p.map_acc') }}</h2>
+          <p class="muted">{{ t('p.map_hint')|replace('**', '') }}</p>
 
-        <div class="field">
-          <label>{{ t('p.ins_col') }}</label>
-          <div id="prep-ins" class="multi-box"></div>
+          <div class="field">
+            <label>{{ t('p.ins_col') }}</label>
+            <div id="prep-ins" class="multi-box"></div>
+          </div>
+          <div class="field">
+            <label for="prep-fixed">{{ t('p.fixed') }}</label>
+            <textarea id="prep-fixed" class="textarea textarea-bordered w-full" rows="2"
+                      placeholder="{{ t('p.fixed_ph') }}"></textarea>
+          </div>
+          <div class="field">
+            <label>{{ t('p.input_col') }}</label>
+            <div id="prep-input" class="multi-box"></div>
+          </div>
+          <div class="field">
+            <label>{{ t('p.think_col') }}</label>
+            <div id="prep-think" class="multi-box"></div>
+          </div>
+          <div class="field">
+            <label>{{ t('p.out_col') }}</label>
+            <div id="prep-out" class="multi-box"></div>
+          </div>
+          <div class="field">
+            <label for="prep-name">{{ t('p.name') }}</label>
+            <input id="prep-name" class="input input-bordered w-full"
+                   placeholder="{{ t('p.name_ph') }}">
+          </div>
+          <div class="row">
+            <button id="prep-preview" class="btn btn-sm" type="button" disabled>
+              {{ t('p.preview_btn') }}
+            </button>
+            <button id="prep-generate" class="btn btn-primary" type="button" disabled>
+              {{ t('p.generate_btn') }}
+            </button>
+            <button id="prep-cancel" class="btn btn-error btn-outline btn-sm hidden" type="button">
+              {{ t('web.cancel') }}
+            </button>
+          </div>
         </div>
-        <div class="field">
-          <label for="prep-fixed">{{ t('p.fixed') }}</label>
-          <textarea id="prep-fixed" class="textarea textarea-bordered w-full" rows="2"
-                    placeholder="{{ t('p.fixed_ph') }}"></textarea>
+      </section>
+
+      <section class="card bg-base-100 shadow-sm" id="prep-preview-card">
+        <div class="card-body">
+          <h2 class="card-title text-base">{{ t('p.preview') }}</h2>
+          <p class="muted">{{ t('p.preview_hint') }}</p>
+          <pre id="prep-preview-out" class="pre"></pre>
         </div>
-        <div class="field">
-          <label>{{ t('p.input_col') }}</label>
-          <div id="prep-input" class="multi-box"></div>
-        </div>
-        <div class="field">
-          <label>{{ t('p.think_col') }}</label>
-          <div id="prep-think" class="multi-box"></div>
-        </div>
-        <div class="field">
-          <label>{{ t('p.out_col') }}</label>
-          <div id="prep-out" class="multi-box"></div>
-        </div>
-        <div class="field">
-          <label for="prep-name">{{ t('p.name') }}</label>
-          <input id="prep-name" class="input input-bordered w-full"
-                 placeholder="{{ t('p.name_ph') }}">
-        </div>
-        <div class="row">
-          <button id="prep-preview" class="btn btn-sm" type="button" disabled>
-            {{ t('p.preview_btn') }}
-          </button>
-          <button id="prep-generate" class="btn btn-primary" type="button" disabled>
-            {{ t('p.generate_btn') }}
-          </button>
-          <button id="prep-cancel" class="btn btn-error btn-outline btn-sm hidden" type="button">
-            {{ t('web.cancel') }}
-          </button>
-        </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
     <div class="stack">
       <section class="card bg-base-100 shadow-sm">
@@ -131,14 +141,6 @@
                     value="0" max="100"></progress>
           <div id="prep-status" class="alert hidden"></div>
           <pre id="prep-log" class="pre log-box"></pre>
-        </div>
-      </section>
-
-      <section class="card bg-base-100 shadow-sm">
-        <div class="card-body">
-          <h2 class="card-title text-base">{{ t('p.preview') }}</h2>
-          <p class="muted">{{ t('p.preview_hint') }}</p>
-          <pre id="prep-preview-out" class="pre"></pre>
         </div>
       </section>
     </div>

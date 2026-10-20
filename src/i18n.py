@@ -16,6 +16,7 @@ from typing import Iterator
 from .paths import LOCALES_DIR
 
 _CACHE: dict[str, dict] = {}
+_CACHE_MTIME: dict[str, float] = {}
 _DEFAULT_LANG = "zh"
 _REQUEST_LANG: ContextVar[str | None] = ContextVar("unsloth_gui_lang", default=None)
 
@@ -52,13 +53,18 @@ def language(lang: str | None) -> Iterator[str]:
 
 
 def _load(lang: str) -> dict:
-    if lang not in _CACHE:
+    """读文案；按文件 mtime 自动失效，改完 locales 不用重启服务。"""
+    path = Path(LOCALES_DIR) / f"{lang}.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if lang not in _CACHE or _CACHE_MTIME.get(lang) != mtime:
         try:
-            _CACHE[lang] = json.loads(
-                (Path(LOCALES_DIR) / f"{lang}.json").read_text(encoding="utf-8")
-            )
+            _CACHE[lang] = json.loads(path.read_text(encoding="utf-8"))
+            _CACHE_MTIME[lang] = mtime
         except Exception:
-            _CACHE[lang] = {}
+            _CACHE.setdefault(lang, {})
     return _CACHE[lang]
 
 

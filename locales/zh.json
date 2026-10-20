@@ -348,6 +348,7 @@
   "web.prepare.uploaded": "上传完成",
   "web.prepare.columns": "已读取 {n} 列，可以开始映射",
   "web.prepare.to_mapping": "已切到「映射生成」，勾好角色再生成",
+  "web.prepare.previewed": "预览已更新（见下方）",
   "web.prepare.inspect_first": "先读取列信息",
   "web.job_running": "任务运行中…",
   "web.job_done": "任务完成",
