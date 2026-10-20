@@ -160,33 +160,55 @@ esac
 
 RUNNING_PID=""
 
+# 找出占着端口的进程（PID 文件丢了也能收拾残留）
+port_pid() {
+  local pid=""
+  if command -v ss >/dev/null 2>&1; then
+    pid="$(ss -ltnpH "sport = :$PORT" 2>/dev/null \
+      | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  fi
+  if [[ -z "$pid" ]] && command -v lsof >/dev/null 2>&1; then
+    pid="$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -z "$pid" ]] && command -v fuser >/dev/null 2>&1; then
+    pid="$(fuser "$PORT/tcp" 2>/dev/null | tr -s ' ' '\n' \
+      | grep -E '^[0-9]+$' | head -1 || true)"
+  fi
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+# 是不是本项目的 web 进程
+is_web_process() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 0
+  local cmdline
+  cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+  [[ "$cmdline" == *"-m web"* || "$cmdline" == *"web/__main__.py"* ]]
+}
+
 is_running() {
-  [[ -f "$PID_FILE" ]] || return 1
-
-  local pid
-  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  [[ "$pid" =~ ^[0-9]+$ ]] || {
-    rm -f "$PID_FILE"
-    return 1
-  }
-
-  if ! kill -0 "$pid" 2>/dev/null; then
-    rm -f "$PID_FILE"
-    return 1
-  fi
-
-  # 防止 PID 被其他进程复用：Linux 上核对命令行。
-  if [[ -r "/proc/$pid/cmdline" ]]; then
-    local cmdline
-    cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-    if [[ "$cmdline" != *"-m web"* && "$cmdline" != *"web/__main__.py"* ]]; then
-      rm -f "$PID_FILE"
-      return 1
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[0-9]+$ ]] && is_web_process "$pid"; then
+      RUNNING_PID="$pid"
+      return 0
     fi
+    rm -f "$PID_FILE"
   fi
 
-  RUNNING_PID="$pid"
-  return 0
+  # PID 文件没了（例如 .run 被清掉），但端口上还挂着本项目的进程 → 认回来
+  local port_proc
+  port_proc="$(port_pid || true)"
+  if [[ -n "$port_proc" ]] && is_web_process "$port_proc"; then
+    RUNNING_PID="$port_proc"
+    mkdir -p "$RUN_DIR"
+    printf '%s\n' "$port_proc" > "$PID_FILE"
+    return 0
+  fi
+  return 1
 }
 
 health_ok() {
@@ -215,6 +237,15 @@ start_server() {
     printf '服务已在运行: PID %s\n' "$RUNNING_PID"
     printf '地址: http://%s:%s\n' "$CHECK_HOST" "$PORT"
     return 0
+  fi
+
+  # 端口被别的程序占了：直接说清楚，别让 uvicorn 抛 address already in use
+  local squatter
+  squatter="$(port_pid || true)"
+  if [[ -n "$squatter" ]]; then
+    printf '错误: 端口 %s 已被其他进程占用 (PID %s)\n' "$PORT" "$squatter" >&2
+    printf '换个端口: ./server.sh start --port 7862\n' >&2
+    return 1
   fi
 
   [[ -x "$VENV_PY" ]] \
@@ -258,7 +289,6 @@ stop_server() {
     printf '服务未运行\n'
     return 0
   fi
-
   local pid="$RUNNING_PID"
   info "停止服务: PID $pid"
   kill "$pid" 2>/dev/null || true
