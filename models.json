@@ -1,11 +1,5 @@
 [
   {
-    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
-    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized",
-    "load_in_4bit": true,
-    "dtype": null
-  },
-  {
     "display_name": "Llama-3 8B Instruct (4-bit)",
     "model_id": "unsloth/llama-3-8b-instruct-bnb-4bit",
     "load_in_4bit": true,
@@ -26,6 +20,12 @@
   {
     "display_name": "Gemma-3 4B (Google 极致性能版)",
     "model_id": "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit",
+    "load_in_4bit": true,
+    "dtype": null
+  },
+  {
+    "display_name": "gemma-3-1b-it-qat-q4_0-unquantized",
+    "model_id": "../gemma-3-1b-it-qat-q4_0-unquantized",
     "load_in_4bit": true,
     "dtype": null
   }

@@ -1,16 +1,20 @@
-"""训练任务管理：修复原来“UI线程直接 trainer.train() 卡死、无法取消、断点逻辑粗糙”.
+"""训练任务管理：单训练锁、可取消、断点续训、训练清单.
 
-- 单进程单训练锁：防止并发训练互相踩显存
-- CancelCallback：点“停止”后当前 epoch/step 结束即停，不杀进程
-- TRL 新旧 API 兼容：SFTConfig+processing_class 优先，旧版自动回退
-- resume：bool -> 自动找最新 checkpoint 路径
-- 输出目录保护：同名且非续训直接报错，避免静默覆盖
+关键行为：
+- 单进程单训练锁，防止并发训练互相踩显存
+- CancelCallback：点“停止”后当前 step 结束即停，不杀进程
+- 取消后仍会把当前 LoRA adapter 落盘，避免白训
+- 续训按 checkpoint 数字取最新；勾了续训却没有断点直接报错，不静默重训覆盖
+- 训练完成写 run_manifest.json（基础模型 / 数据集 / 模板 / seq_len），
+  推理端据此还原训练时的 prompt 格式
+- 无 CUDA 时给明确提示，不做无意义的模型加载
+- 重型依赖全部函数内延迟导入
 """
 from __future__ import annotations
 
 import gc
 import inspect
-import os
+import re
 import threading
 import traceback
 from dataclasses import dataclass
@@ -18,14 +22,13 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUTS_PARENT_DIR = PROJECT_ROOT / "outputs"
-LOGS_PARENT_DIR = PROJECT_ROOT / "logs"
+from .paths import LOGS_PARENT_DIR, OUTPUTS_PARENT_DIR
+from .storage import atomic_write_json
 
 _lock = threading.Lock()
 _state = {"running": False, "experiment": None}
 _cancel_event = threading.Event()
+_external_cancel: Optional[threading.Event] = None
 
 
 def is_training() -> bool:
@@ -43,17 +46,46 @@ def request_cancel() -> str:
     return t("tr.cancel_req", exp=_state.get("experiment"))
 
 
+def is_epoch_mode(mode: str) -> bool:
+    """兼容旧中文标签、英文标签与代码值（epochs / steps）."""
+    s = str(mode or "").strip().lower()
+    return s in ("epoch", "epochs") or "epoch" in s or "轮次" in s
+
+
 def _find_latest_checkpoint(output_dir: Path) -> Optional[str]:
+    """按 checkpoint-<数字> 的最大值取，不靠 mtime（复制/恢复后 mtime 不可靠）."""
     if not output_dir.is_dir():
         return None
-    ckpts = sorted(output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime)
-    return str(ckpts[-1]) if ckpts else None
+    found: list[tuple[int, Path]] = []
+    for p in output_dir.glob("checkpoint-*"):
+        if not p.is_dir():
+            continue
+        m = re.fullmatch(r"checkpoint-(\d+)", p.name)
+        if m:
+            found.append((int(m.group(1)), p))
+    if found:
+        return str(max(found, key=lambda x: x[0])[1])
+    # 极端兼容：非标准命名的 checkpoint 目录按 mtime 兜底
+    ckpts = [p for p in output_dir.glob("checkpoint-*") if p.is_dir()]
+    if ckpts:
+        return str(max(ckpts, key=lambda p: p.stat().st_mtime))
+    return None
+
+
+def _call_progress(progress, frac: float, desc: str) -> None:
+    if progress is None:
+        return
+    try:
+        progress(frac, desc=desc)
+    except Exception:
+        pass
 
 
 def _build_training_args(training_mode: str, num_epochs: float, max_steps: int,
                          save_steps: int, output_dir: Path, logging_dir: Path,
-                         batch_size: int, grad_accum: int, lr: float):
-    """优先 SFTConfig（新TRL），否则回退 TrainingArguments（旧版）."""
+                         batch_size: int, grad_accum: int, lr: float,
+                         seq_len: int):
+    """优先 SFTConfig（新 TRL），否则回退 TrainingArguments（旧版）."""
     import torch
 
     try:
@@ -63,7 +95,6 @@ def _build_training_args(training_mode: str, num_epochs: float, max_steps: int,
         from transformers import TrainingArguments as ArgsCls
         is_sft = False
 
-    bf16_ok = False
     try:
         bf16_ok = bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported())
     except Exception:
@@ -75,7 +106,7 @@ def _build_training_args(training_mode: str, num_epochs: float, max_steps: int,
         per_device_train_batch_size=int(batch_size),
         gradient_accumulation_steps=int(grad_accum),
         learning_rate=float(lr),
-        logging_steps=1,
+        logging_steps=5,
         optim="adamw_8bit",
         fp16=not bf16_ok,
         bf16=bf16_ok,
@@ -86,7 +117,7 @@ def _build_training_args(training_mode: str, num_epochs: float, max_steps: int,
         save_total_limit=3,
         report_to=["tensorboard"],
     )
-    if training_mode == "按轮次 (Epochs)":
+    if is_epoch_mode(training_mode):
         base["num_train_epochs"] = float(num_epochs)
         base["save_strategy"] = "epoch"
     else:
@@ -95,30 +126,50 @@ def _build_training_args(training_mode: str, num_epochs: float, max_steps: int,
         base["save_steps"] = int(save_steps)
 
     if is_sft:
-        # 新版字段名 + 2026.7.x padding_free 显式关闭避免误触发
-        base["max_length"] = int(os.environ.get("UNSLOTH_MAX_SEQ_LEN", "2048"))
+        # 新版字段名 + 显式关闭 padding_free，避免误触发
+        base["max_length"] = int(seq_len)
         base["packing"] = False
         base["padding_free"] = False
+        base["dataset_text_field"] = "text"
         sig = inspect.signature(ArgsCls)
         base = {k: v for k, v in base.items() if k in sig.parameters}
     return ArgsCls(**base)
 
 
-def _build_trainer(model, tokenizer, dataset, training_args, max_seq_length: int):
+def _build_trainer(model, tokenizer, dataset, training_args, max_seq_length: int,
+                   on_log=None):
     from trl import SFTTrainer
 
+    callbacks = []
     try:
         from transformers import TrainerCallback
 
         class CancelCallback(TrainerCallback):
             def on_step_end(self, args, state, control, **kwargs):
-                if _cancel_event.is_set():
+                if _cancel_event.is_set() or (
+                        _external_cancel is not None and _external_cancel.is_set()):
                     control.should_training_stop = True
                 return control
 
-        cancel_cb = CancelCallback()
+        callbacks.append(CancelCallback())
+
+        if on_log is not None:
+            class MetricsCallback(TrainerCallback):
+                def on_log(self, args, state, control, logs=None, **kwargs):
+                    if not logs:
+                        return
+                    payload = {"step": int(getattr(state, "global_step", 0) or 0),
+                               "epoch": getattr(state, "epoch", None)}
+                    payload.update({k: v for k, v in logs.items()
+                                    if isinstance(v, (int, float, str, bool)) or v is None})
+                    try:
+                        on_log(payload)
+                    except Exception:
+                        pass
+
+            callbacks.append(MetricsCallback())
     except Exception:
-        cancel_cb = None
+        pass
 
     sig = inspect.signature(SFTTrainer.__init__)
     params = sig.parameters
@@ -131,20 +182,14 @@ def _build_trainer(model, tokenizer, dataset, training_args, max_seq_length: int
     # max_seq_length vs max_length
     if "max_seq_length" in params:
         kwargs["max_seq_length"] = int(max_seq_length)
-    # dataset_text_field 在新版挪到了 SFTConfig，这里按需传递
     if "dataset_text_field" in params:
         kwargs["dataset_text_field"] = "text"
     if "dataset_num_proc" in params:
         kwargs["dataset_num_proc"] = 2
-    if "packing" in params and "packing" not in kwargs:
+    if "packing" in params:
         kwargs["packing"] = False
-    try:
-        from transformers.integrations import TensorBoardCallback
-        kwargs.setdefault("callbacks", []).append(TensorBoardCallback())
-    except Exception:
-        pass
-    if cancel_cb is not None:
-        kwargs.setdefault("callbacks", []).append(cancel_cb)
+    if callbacks:
+        kwargs["callbacks"] = callbacks
     return SFTTrainer(**kwargs)
 
 
@@ -168,9 +213,57 @@ class TrainRequest:
     max_seq_length: int
 
 
-def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]:
-    """生成器：yield 状态文本，Gradio 侧保持响应 + 可取消."""
-    exp = (req.experiment_name or "").strip().replace(" ", "_")
+def _safe_exp_name(name: str) -> str:
+    exp = re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", (name or "").strip())
+    exp = exp.strip("._")
+    return exp[:80]
+
+
+def _manifest_payload(req: TrainRequest, model_cfg, datasets_cfg, seq_len: int,
+                      status: str) -> dict:
+    templates: list[str] = []
+    columns: list[dict] = []
+    for cfg in datasets_cfg:
+        if cfg.prompt_template and cfg.prompt_template not in templates:
+            templates.append(cfg.prompt_template)
+        columns.append({"name": cfg.display_name,
+                        "input_columns": cfg.input_columns,
+                        "template": cfg.prompt_template})
+    return {
+        "status": status,
+        "base_model": model_cfg.model_id,
+        "base_model_display": model_cfg.display_name,
+        "base_model_source": model_cfg.source,
+        "datasets": [c.display_name for c in datasets_cfg],
+        "dataset_columns": columns,
+        "prompt_template": templates[0] if len(templates) == 1 else "",
+        "prompt_templates": templates,
+        "seq_len": int(seq_len),
+        "training_mode": "epochs" if is_epoch_mode(req.training_mode) else "steps",
+        "num_epochs": float(req.num_epochs),
+        "max_steps": int(req.max_steps),
+        "save_steps": int(req.save_steps),
+        "lora_r": int(req.lora_r),
+        "lora_alpha": int(req.lora_alpha),
+        "batch_size": int(req.batch_size),
+        "grad_accum": int(req.grad_accum),
+        "learning_rate": float(req.lr),
+        "truncated": bool(req.truncate_dataset),
+    }
+
+
+def _write_manifest(output_dir: Path, payload: dict) -> None:
+    try:
+        atomic_write_json(Path(output_dir) / "run_manifest.json", payload)
+    except Exception:
+        pass
+
+
+def run_training(req: TrainRequest, progress=None,
+                 on_log=None, cancel_event=None) -> Generator[str, None, None]:
+    """生成器：yield 状态文本；progress(frac, desc=) 推进度；on_log(dict) 推指标."""
+    global _external_cancel
+    exp = _safe_exp_name(req.experiment_name)
     if not exp:
         yield t("tr.no_exp_name")
         return
@@ -183,64 +276,91 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
         return
     _state.update(running=True, experiment=exp)
     _cancel_event.clear()
+    _external_cancel = cancel_event
+    output_dir = OUTPUTS_PARENT_DIR / exp
+    logging_dir = LOGS_PARENT_DIR / exp
+
+    def _cancelled() -> bool:
+        return (_cancel_event.is_set()
+                or (_external_cancel is not None and _external_cancel.is_set()))
+
     try:
-        from .config import load_datasets_config, load_models_config, find_by_name
-        from .config import ensure_local_model
-        from .dataset_utils import prepare_dataset, combine_datasets, apply_chat_template_if_needed
+        from .config import (
+            ensure_local_model,
+            find_by_name,
+            is_trainable_dataset,
+            load_datasets_config,
+            load_models_config,
+            trainable_reason,
+        )
+        from .dataset_utils import combine_datasets, prepare_dataset
 
         yield t("tr.prep_exp", exp=exp)
-        output_dir = OUTPUTS_PARENT_DIR / exp
-        logging_dir = LOGS_PARENT_DIR / exp
-        if output_dir.exists() and any(output_dir.iterdir()) and not req.resume_training:
-            yield t("tr.dir_exists", dir=output_dir)
+
+        if _cancelled():
+            yield t("tr.cancelled_before_start")
             return
 
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        non_empty = output_dir.exists() and any(output_dir.iterdir())
+        resume_arg = None
+        if non_empty:
+            if not req.resume_training:
+                yield t("tr.dir_exists", dir=output_dir)
+                return
+            resume_arg = _find_latest_checkpoint(output_dir)
+            if resume_arg is None:
+                yield t("tr.resume_no_ckpt", dir=output_dir)
+                return
+
         models = load_models_config()
-        datasets_cfg = load_datasets_config()
+        dataset_warnings: list[str] = []
+        datasets_cfg = load_datasets_config(warnings=dataset_warnings)
+        for w in dataset_warnings:
+            yield w
         model_cfg = find_by_name(models, req.selected_model_name)
         if model_cfg is None:
             yield t("tr.no_model", name=req.selected_model_name)
             return
 
-        if progress is not None:
-            try:
-                progress(0.1, desc=t("tr.loading_data"))
-            except Exception:
-                pass
+        _call_progress(progress, 0.1, t("tr.loading_data"))
         yield t("tr.loading_data")
         all_ds = []
+        selected_cfgs = []
         for name in req.selected_dataset_names:
+            if _cancelled():
+                yield t("tr.cancelled_before_start")
+                return
             cfg = find_by_name(datasets_cfg, name)
             if cfg is None:
                 yield t("tr.warn_skip", name=name)
                 continue
-            if not getattr(cfg, "processed", False):
-                yield t("tr.unprocessed", name=name)
+            if not is_trainable_dataset(cfg):
+                reason = trainable_reason(cfg) or t("tr.unprocessed", name=name)
+                yield t("tr.unprocessed_reason", name=name, reason=reason)
                 return
-            all_ds.append(prepare_dataset(cfg, req.truncate_dataset, max_samples=req.max_samples))
+            all_ds.append(prepare_dataset(cfg, req.truncate_dataset,
+                                          max_samples=req.max_samples))
+            selected_cfgs.append(cfg)
         if not all_ds:
             yield t("tr.no_valid_ds")
             return
         combined = combine_datasets(all_ds)
         yield t("tr.ready", n=len(combined), k=len(all_ds))
-        # 目录在这里才建：前面的校验失败直接返回，不留空目录污染 LoRA 列表
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logging_dir.mkdir(parents=True, exist_ok=True)
 
-        # 延迟导入重型依赖，UI 无 GPU 也能先打开；
-        # torch 只在真正要碰模型时才导入，前面的数据校验不需要它
+        # 重型依赖最后才导入：前面的数据校验完全不需要 torch
         import torch
+
+        if not torch.cuda.is_available():
+            yield t("tr.no_cuda")
+            return
         try:
             torch._dynamo.config.recompile_limit = 100
         except Exception:
             pass
         from unsloth import FastLanguageModel
 
-        if progress is not None:
-            try:
-                progress(0.3, desc=t("tr.init_model", id=model_cfg.model_id))
-            except Exception:
-                pass
+        _call_progress(progress, 0.3, t("tr.init_model", id=model_cfg.model_id))
         yield t("tr.init_model", id=model_cfg.model_id)
         try:
             model_path = ensure_local_model(model_cfg)
@@ -256,7 +376,9 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             dtype=dtype,
             load_in_4bit=bool(model_cfg.load_in_4bit),
         )
-        tokenizer = apply_chat_template_if_needed(tokenizer, model_cfg) if hasattr(model_cfg, "chat_template") else tokenizer
+        if _cancelled():
+            yield t("tr.cancelled_before_start")
+            return
         model = FastLanguageModel.get_peft_model(
             model,
             r=int(req.lora_r),
@@ -269,48 +391,54 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             random_state=3407,
         )
 
-        os.environ["UNSLOTH_MAX_SEQ_LEN"] = str(seq_len)
         training_args = _build_training_args(
             req.training_mode, req.num_epochs, req.max_steps, req.save_steps,
             output_dir, logging_dir, req.batch_size, req.grad_accum, req.lr,
+            seq_len,
         )
-        trainer = _build_trainer(model, tokenizer, combined, training_args, seq_len)
+        trainer = _build_trainer(model, tokenizer, combined, training_args,
+                                 seq_len, on_log=on_log)
 
-        resume_arg = None
-        if req.resume_training:
-            latest = _find_latest_checkpoint(output_dir)
-            if latest:
-                resume_arg = latest
-                yield t("tr.resume_from", ckpt=resume_arg)
-            else:
-                yield t("tr.resume_fresh")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logging_dir.mkdir(parents=True, exist_ok=True)
+        if resume_arg:
+            yield t("tr.resume_from", ckpt=resume_arg)
         else:
-            yield t("tr.start_new")
+            yield t("tr.resume_fresh") if req.resume_training else t("tr.start_new")
 
-        if progress is not None:
-            try:
-                progress(0.5, desc=t("tr.training"))
-            except Exception:
-                pass
+        _call_progress(progress, 0.5, t("tr.training"))
         trainer.train(resume_from_checkpoint=resume_arg)
 
-        if _cancel_event.is_set():
-            ckpt = _find_latest_checkpoint(output_dir)
-            yield t("tr.stopped", ckpt=t("tr.stopped_ckpt", ckpt=ckpt) if ckpt else "")
-            return
+        stopped = _cancelled()
+        if stopped:
+            _call_progress(progress, 0.85, t("tr.saving"))
+            yield t("tr.saving")
+        else:
+            _call_progress(progress, 0.9, t("tr.saving"))
+            yield t("tr.saving")
 
-        if progress is not None:
-            try:
-                progress(0.9, desc=t("tr.saving"))
-            except Exception:
-                pass
+        # 无论正常结束还是手动停止，都把当前 adapter 落盘
         model.save_pretrained(str(output_dir))
         tokenizer.save_pretrained(str(output_dir))
+        if stopped:
+            try:
+                trainer.save_state()
+            except Exception:
+                pass
+        status = "stopped" if stopped else "completed"
+        _write_manifest(output_dir, _manifest_payload(
+            req, model_cfg, selected_cfgs, seq_len, status))
+
+        if stopped:
+            ckpt = _find_latest_checkpoint(output_dir)
+            yield t("tr.stopped",
+                    ckpt=t("tr.stopped_ckpt", ckpt=ckpt) if ckpt else "")
+            return
+        _call_progress(progress, 1.0, t("tr.done", dir=output_dir))
         yield t("tr.done", dir=output_dir)
     except Exception:
         yield t("tr.failed", trace=traceback.format_exc(limit=8))
     finally:
-        # 释放显存，同一进程后续可做推理
         try:
             gc.collect()
             import torch
@@ -320,4 +448,5 @@ def run_training(req: TrainRequest, progress=None) -> Generator[str, None, None]
             pass
         _state.update(running=False, experiment=None)
         _cancel_event.clear()
+        _external_cancel = None
         _lock.release()

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t('web.page.chat') }}</h1>
+    <p class="muted">{{ t('i.steps')|replace('**', '') }}</p>
+  </div>
+  <span id="chat-conn" class="badge badge-ghost">{{ t('web.chat.disconnected') }}</span>
+</div>
+
+<div class="chat-layout">
+  <aside class="stack">
+    <section class="card bg-base-100 shadow-sm">
+      <div class="card-body stack">
+        <div class="field">
+          <label for="chat-base">{{ t('i.model') }}</label>
+          <select id="chat-base" class="select select-bordered w-full"></select>
+        </div>
+        <div class="field">
+          <label for="chat-lora">{{ t('i.lora') }}</label>
+          <select id="chat-lora" class="select select-bordered w-full"></select>
+        </div>
+        <div class="row">
+          <button id="chat-load" class="btn btn-primary btn-sm" type="button">▶ {{ t('i.load') }}</button>
+          <button id="chat-unload" class="btn btn-sm" type="button">⏏ {{ t('i.unload') }}</button>
+          <button id="chat-refresh" class="btn btn-ghost btn-sm" type="button">🔄</button>
+        </div>
+        <div id="chat-load-status" class="alert hidden"></div>
+        <pre id="chat-lora-info" class="pre small"></pre>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 shadow-sm">
+      <div class="card-body stack">
+        <div class="field">
+          <label for="chat-system">{{ t('i.system') }}</label>
+          <textarea id="chat-system" class="textarea textarea-bordered w-full" rows="4">{{ t('i.system_default') }}</textarea>
+        </div>
+        <details>
+          <summary class="cursor-pointer text-sm font-semibold">{{ t('i.gen') }}</summary>
+          <div class="stack mt-2">
+            <div class="field">
+              <label for="chat-max-tokens">{{ t('i.max_tokens') }}</label>
+              <input id="chat-max-tokens" type="number" min="1" step="32" value="256"
+                     class="input input-bordered w-full">
+            </div>
+            <div class="field">
+              <label for="chat-temp">{{ t('i.temp') }}</label>
+              <input id="chat-temp" type="number" min="0" max="2" step="0.05" value="0.7"
+                     class="input input-bordered w-full">
+            </div>
+            <div class="field">
+              <label for="chat-top-p">{{ t('i.top_p') }}</label>
+              <input id="chat-top-p" type="number" min="0.01" max="1" step="0.01" value="0.95"
+                     class="input input-bordered w-full">
+            </div>
+            <div class="field">
+              <label for="chat-top-k">{{ t('i.top_k') }}</label>
+              <input id="chat-top-k" type="number" min="0" max="200" step="1" value="40"
+                     class="input input-bordered w-full">
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </aside>
+
+  <section class="card bg-base-100 shadow-sm chat-card">
+    <div class="card-body chat-body">
+      <div id="chat-log" class="chat-log">
+        <div id="chat-empty" class="chat-empty muted">{{ t('web.chat.empty') }}</div>
+      </div>
+      <div id="chat-typing" class="muted hidden">{{ t('web.chat.thinking') }}</div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" class="textarea textarea-bordered flex-1" rows="2"
+                  placeholder="{{ t('i.input_ph') }}"></textarea>
+        <div class="col-tight">
+          <button id="chat-send" class="btn btn-primary" type="button">{{ t('i.send') }}</button>
+          <button id="chat-stop" class="btn btn-error btn-outline hidden" type="button">{{ t('web.chat.stop') }}</button>
+          <button id="chat-clear" class="btn btn-ghost btn-sm" type="button">{{ t('i.clear') }}</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/js/chat.js"></script>
+{% endblock %}

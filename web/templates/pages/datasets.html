@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t('web.page.datasets') }}</h1>
+    <p class="muted">{{ t('d.subtitle') }}</p>
+  </div>
+  <button id="datasets-refresh" class="btn btn-sm" type="button">🔄 {{ t('d.refresh') }}</button>
+</div>
+
+<div id="datasets-warnings"></div>
+
+<div class="grid-2">
+  <section class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">{{ t('d.title')|replace('## ', '') }}</h2>
+      <div class="table-wrap">
+        <table class="table table-sm table-zebra">
+          <thead>
+            <tr>
+              <th>{{ t('d.col.name') }}</th>
+              <th>{{ t('d.col.rows') }}</th>
+              <th>{{ t('d.col.source') }}</th>
+              <th>{{ t('d.col.created') }}</th>
+              <th>{{ t('d.col.size') }}</th>
+              <th>{{ t('d.col.trainable') }}</th>
+            </tr>
+          </thead>
+          <tbody id="datasets-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card bg-base-100 shadow-sm">
+    <div class="card-body stack">
+      <h2 class="card-title text-base" id="dataset-title">{{ t('d.detail') }}</h2>
+      <pre id="dataset-detail" class="pre">{{ t('d.detail_empty') }}</pre>
+
+      <div class="field">
+        <label for="dataset-new-name">{{ t('d.newname') }}</label>
+        <div class="row">
+          <input id="dataset-new-name" class="input input-bordered flex-1"
+                 placeholder="{{ t('d.newname_ph') }}">
+          <button id="dataset-rename" class="btn btn-sm" type="button">✏️ {{ t('d.rename') }}</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="dataset-sample" class="btn btn-sm" type="button">👁 {{ t('d.sample_btn') }}</button>
+        <button id="dataset-delete" class="btn btn-error btn-outline btn-sm" type="button">🗑 {{ t('d.del') }}</button>
+      </div>
+      <p class="muted">{{ t('d.sample') }}</p>
+      <pre id="dataset-sample-out" class="pre hidden"></pre>
+      <div id="dataset-status" class="alert hidden"></div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/datasets.js"></script>
+{% endblock %}

@@ -6,10 +6,9 @@ import socket
 import subprocess
 from typing import Optional
 
-from .config import PROJECT_ROOT
 from .i18n import t
+from .paths import LOGS_PARENT_DIR
 
-LOGS_PARENT_DIR = PROJECT_ROOT / "logs"
 _PROC: Optional[subprocess.Popen] = None
 _PORT: int = 6006
 

@@ -18,10 +18,11 @@ from pathlib import Path
 
 import gradio as gr
 
-from src.config import PROJECT_ROOT, find_by_name, safe_load_configs
-from src.config import load_models_config, save_models_config, ModelConfig, model_source
+from src.config import PROJECT_ROOT, find_by_name, load_datasets_config, safe_load_configs
+from src.config import is_trainable_dataset, load_models_config, save_models_config, ModelConfig, model_source
 from src.config import source_label
 from src.i18n import get_lang, set_lang, t
+from src.paths import resolve_local
 from src.data_mgmt import delete_entry, detail_text, list_entries, rename_entry, sample_text
 from src.dataprep import generate_unified, inspect_text, persist_upload, preview_row
 from src.dataset_utils import dataset_preview_text
@@ -33,7 +34,14 @@ from src.inference_utils import (
     unload_model,
 )
 from src.tb_utils import launch_tensorboard
-from src.train_utils import TrainRequest, current_experiment, is_training, request_cancel, run_training
+from src.train_utils import (
+    TrainRequest,
+    current_experiment,
+    is_epoch_mode,
+    is_training,
+    request_cancel,
+    run_training,
+)
 
 # 界面语言必须在 UI 构建前确定：Gradio 静态构建，启动参数 > 环境变量 > 中文默认
 import sys as _sys
@@ -57,7 +65,7 @@ MODEL_DISPLAY_NAMES = [m.display_name for m in MODELS]
 
 
 def _processed_names(items):
-    return [d.display_name for d in items if getattr(d, "processed", False)]
+    return [d.display_name for d in items if is_trainable_dataset(d)]
 
 
 # 训练 Tab 只认「数据处理」制成的统一数据；全部列表留给处理 Tab 做迁移来源
@@ -66,9 +74,16 @@ ALL_DATASET_NAMES = [d.display_name for d in DATASETS]
 
 
 def _reload_datasets():
-    """重读配置并刷新全局列表，返回告警信息."""
+    """重读配置并刷新全局列表，返回告警信息.
+
+    逐文件容错：坏文件只跳过，不会把整个列表清空；目录不存在也保留旧列表。
+    """
     global DATASET_DISPLAY_NAMES, ALL_DATASET_NAMES
-    _, fresh, warns = safe_load_configs()
+    warns: list[str] = []
+    try:
+        fresh = load_datasets_config(warnings=warns)
+    except Exception as e:
+        return [t("warn.datasets", err=e)]
     DATASETS[:] = fresh
     DATASET_DISPLAY_NAMES = _processed_names(fresh)
     ALL_DATASET_NAMES = [d.display_name for d in fresh]
@@ -184,9 +199,10 @@ def _model_save(display, source, model_id, use_4bit, dtype, seq_len, chat,
     if code != "local" and " " in model_id:
         return (t("m.err.space"),) + (gr.update(),) * 3
     if code == "local":
-        p = Path(model_id)
-        if not p.is_absolute():
-            p = PROJECT_ROOT / p
+        try:
+            p = resolve_local(model_id)
+        except Exception:
+            p = Path(model_id).expanduser()
         if not p.exists():
             return (t("m.err.local_missing", id=model_id, path=p),) + (gr.update(),) * 3
     try:
@@ -202,10 +218,12 @@ def _model_save(display, source, model_id, use_4bit, dtype, seq_len, chat,
         chat_template=(chat or "").strip() or None,
         source=code,
     )
+    snapshot = list(MODELS)
     MODELS[:] = [c for c in MODELS if c.display_name != display] + [cfg]
     try:
         save_models_config(MODELS)
     except Exception as e:
+        MODELS[:] = snapshot
         return (t("m.err.write", err=e),) + (gr.update(),) * 3
     warns = _reload_models()
     msg = t("m.saved", action=t("m.act_update") if existed else t("m.act_add"),
@@ -227,14 +245,19 @@ def _model_delete_step(name, cur_train, cur_inf):
         return (t("m.err.empty_form"),) + (gr.update(),) * 3
     if len(MODELS) <= 1:
         return (t("m.err.last"),) + (gr.update(),) * 3
+    if find_by_name(MODELS, name) is None:
+        _del_armed = None
+        return (t("m.err.notfound_form", name=name),) + (gr.update(),) * 3
     if _del_armed != name:
         _del_armed = name
         return (t("m.del_arm", name=name),) + (gr.update(),) * 3
     _del_armed = None
+    snapshot = list(MODELS)
     MODELS[:] = [c for c in MODELS if c.display_name != name]
     try:
         save_models_config(MODELS)
     except Exception as e:
+        MODELS[:] = snapshot
         return (t("m.err.write", err=e),) + (gr.update(),) * 3
     warns = _reload_models()
     msg = t("m.deleted", name=name)
@@ -385,11 +408,11 @@ HERO_HTML = f"""
 
 
 def _update_training_mode_ui(mode):
-    is_epoch_mode = mode == "按轮次 (Epochs)"
+    is_epoch_mode_selected = is_epoch_mode(mode)
     return (
-        gr.update(visible=is_epoch_mode),
-        gr.update(visible=not is_epoch_mode),
-        gr.update(visible=not is_epoch_mode),
+        gr.update(visible=is_epoch_mode_selected),
+        gr.update(visible=not is_epoch_mode_selected),
+        gr.update(visible=not is_epoch_mode_selected),
     )
 
 
@@ -424,7 +447,11 @@ def _on_dataset_change(selected: list[str]):
 def _apply_recommended(updates: dict, cur_mode, cur_epoch, cur_r, cur_alpha, cur_lr):
     if not updates:
         return cur_mode, cur_epoch, cur_r, cur_alpha, cur_lr
-    mode = updates.get("training_mode", cur_mode)
+    if "training_mode" in updates:
+        mode = (t("t.mode.epochs") if is_epoch_mode(updates["training_mode"])
+                else t("t.mode.steps"))
+    else:
+        mode = cur_mode
     return (
         mode,
         float(updates.get("num_epochs", cur_epoch)),
@@ -566,6 +593,9 @@ def _switch_lang(choice):
     """界面语言切换：Gradio 静态构建，只能重启进程生效。"""
     lang = "en" if (choice or "") == "English" else "zh"
     if lang == get_lang():
+        return gr.skip()
+    if is_training():
+        gr.Warning(t("lang.training_busy"))
         return gr.skip()
     script = cleaned_script()
     new_argv = [script] + cleaned_args() + ["--lang", lang]
@@ -789,8 +819,8 @@ with gr.Blocks() as demo:
                         lora_alpha_slider = gr.Slider(4, 128, value=16, step=4, label="LoRA Alpha")
                     with gr.Accordion(t("t.core"), open=True):
                         training_mode_selector = gr.Radio(
-                            ["按步数 (Steps)", "按轮次 (Epochs)"],
-                            value="按步数 (Steps)", label="训练模式",
+                            [t("t.mode.steps"), t("t.mode.epochs")],
+                            value=t("t.mode.steps"), label=t("t.mode.label"),
                         )
                         num_epochs_slider = gr.Slider(0.1, 10, value=1, step=0.1,
                                                      label=t("t.epochs"), visible=False)
@@ -1016,7 +1046,7 @@ with gr.Blocks() as demo:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Unsloth GUI Trainer v0.1.0")
+    parser = argparse.ArgumentParser(description="Unsloth GUI Trainer v0.2.0")
     parser.add_argument("--host", default=os.environ.get("GRADIO_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_PORT", "7860")))
     parser.add_argument("--share", action="store_true", default=os.environ.get("GRADIO_SHARE", "") == "1",

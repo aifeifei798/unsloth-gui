@@ -1,17 +1,22 @@
 # 🚀 Unsloth GUI Trainer: a lightweight, dedicated fine-tuning workbench
 
-[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue.svg)]()
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-blue.svg)]()
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > [中文版](README.md)
 
-A Gradio + [Unsloth](https://github.com/unslothai/unsloth) GUI for fine-tuning,
+A FastAPI + Jinja2 + [Unsloth](https://github.com/unslothai/unsloth) GUI for fine-tuning,
 focused on **single-GPU text SFT**: model management, data prep, training,
 monitoring and chat on one page — no code, no hand-edited configs.
-Switch UI language (中文/English) at the top; it restarts automatically.
 
-> Text training only (image/video/audio not supported yet). Runs out of the box on 8GB VRAM.
+> The new web UI runs at `http://127.0.0.1:7861`; language switching is instant and
+> needs no restart. The old Gradio UI is kept temporarily at `7860`.
+> This is a single-user local tool with **no authentication** — do not expose it
+> directly to the public internet.
+>
+> Text training only (image/video/audio not supported yet). Runs out of the box on
+> 8GB VRAM.
 
 ---
 
@@ -19,7 +24,7 @@ Switch UI language (中文/English) at the top; it restarts automatically.
 
 | Tab | What it does |
 | --- | ------------ |
-| 🤖 Models | Click a row to edit. Local paths, HuggingFace and ModelScope IDs. Same name overwrites; delete needs two clicks |
+| 🤖 Models | Click a row to edit. Local paths, HuggingFace and ModelScope IDs. Same name overwrites; delete asks for confirmation |
 | 🗂 Data | Unified-data list, row counts, sizes, mapping details. Sample, rename (artifacts move along), delete (only generated artifacts; sources untouched) |
 | 🧹 Data Prep | Upload / HF ID / existing config → 1-row instant column peek → multi-select mapping (instruction / input / think / output) → single-row preview → generate unified training data |
 | 🚀 Train | Steps/epochs modes, cancellable, multi-dataset merge, resume from checkpoint, live TensorBoard |
@@ -29,7 +34,11 @@ Unified format: 4 columns, `instruction / input / think / output`, each multi-se
 and joined top-down with newlines; no Input section when input is unmapped;
 final text is always Instruction / Input (optional) / Response, where
 Response = think + output (`<think>` tags auto-added when missing);
-rows with empty replies are dropped and counted. Only data made here can be trained.
+rows with empty replies are dropped and counted.
+
+**Only data produced by Data Prep (`processed=true`, schema v3, artifact directory
+present) appears in the training dropdown.** The bundled `datasets_config/sunwukong.json`
+is unprocessed by default; run it through Data Prep first.
 
 ---
 
@@ -48,50 +57,80 @@ source venv/bin/activate
 pip install -r requirements.txt
 # or let uv match the torch backend (recommended):
 # uv pip install -r requirements.txt --torch-backend=auto
+
+# Web UI dependencies (FastAPI / Jinja2 / Uvicorn; no training stack)
+pip install -r requirements-web.txt
 ```
 
-Only 5 direct dependencies: `unsloth`, `bitsandbytes`, `gradio`, `tensorboard`,
-`hf_transfer`, `modelscope`. The training stack (torch / transformers / trl …)
-follows unsloth.
+`requirements.txt` is the full training stack; `requirements-web.txt` installs only
+the web layer. Without a GPU/torch you can still open the UI, manage models and
+prepare data — training and inference will report missing dependencies.
 
 ---
 
 ## ▶️ Run
 
 ```bash
-python app.py
-# options: --host 127.0.0.1 --port 7860 --tb-port 6006 --share --lang {zh,en}
-# share is off by default; add --share or GRADIO_SHARE=1 to expose publicly
+# New web UI
+python -m web --port 7861
+
+# Legacy Gradio UI (temporary)
+python app.py --port 7860
 ```
 
-Open `http://127.0.0.1:7860`. Flow: add a model in Models →
-make data in Data Prep → Train (watch TensorBoard on the right, stop anytime) →
-load the LoRA in Test and chat.
+Open `http://127.0.0.1:7861`. Flow: add a model in Models →
+make data in Data Prep → Train (watch TensorBoard live, stop/resume anytime) →
+load the LoRA in Test and chat. Switch 中文/English in the top bar instantly,
+with no restart.
 
-Artifacts: `outputs/<experiment>/` (LoRA adapters), `logs/<experiment/>` (TensorBoard),
-`local_data/processed/<data>/` (unified data).
+Training needs CUDA and the training stack from `requirements.txt`; starting the
+web UI does not import torch.
+
+Artifacts: `outputs/<experiment>/` (LoRA adapter + `run_manifest.json`),
+`logs/<experiment>/` (TensorBoard), `local_data/processed/<data>/` (unified data).
+The chat page reads the prompt template, `seq_len` and base-model info from
+`run_manifest.json`, matching the training format automatically.
 
 ---
 
 ## 📁 Layout
 
 ```
-app.py                  # thin Gradio UI layer
-locales/
-  zh.json / en.json     # all UI strings (standard i18n files — PRs welcome)
+app.py                  # legacy Gradio UI layer (temporary)
+web/                    # FastAPI + Jinja2 web layer
+  main.py               # app entry, language middleware, page routes
+  jobs.py               # background jobs + SSE (training/data prep)
+  routers/              # system / models / datasets / prepare / train / inference
+  templates/            # base + five pages
+  static/               # app.css, page JS, DaisyUI vendor
+tests/                  # pytest: domain / API / jobs / SSE / WebSocket
 src/
+  paths.py              # path resolution (UNSLOTH_GUI_ROOT overrides root)
+  storage.py            # atomic config writes
   config.py             # model/dataset config loading, validation, source resolving
   dataset_utils.py      # training formatting, empty-section cleanup, combining
   dataprep.py           # data prep: peek, mapping, unified-data generation
   data_mgmt.py          # data mgmt: details, rename, delete
-  train_utils.py        # background training jobs, cancel, resume
+  train_utils.py        # background training jobs, cancel, resume, run manifest
   inference_utils.py    # inference loading, VRAM mgmt, streaming chat
   tb_utils.py           # TensorBoard lifecycle
   i18n.py               # tiny i18n helper (zh fallback, key parity check)
+requirements.txt        # full training stack
+requirements-web.txt    # web layer deps (FastAPI / Uvicorn / Jinja2 …)
 models.json             # model list (maintained by the UI, hand-editable)
 datasets_config/        # dataset configs (auto-generated by Data Prep)
 local_data/             # sample data, uploads, artifacts (artifacts git-ignored)
 ```
+
+Tests:
+
+```bash
+pip install pytest
+pytest -q tests/
+```
+
+Tests point `UNSLOTH_GUI_ROOT` at a temporary directory, so they never touch your
+real `models.json`, `datasets_config/`, `outputs/` or `logs/`.
 
 ---
 

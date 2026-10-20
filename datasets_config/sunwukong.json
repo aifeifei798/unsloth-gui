@@ -2,15 +2,15 @@
   "display_name": "孙悟空角色扮演 (示例)",
   "dataset_id": "./local_data/sunwukong_style_100.jsonl",
   "is_local": true,
-  "processed": true,
-  "schema_version": 2,
+  "processed": false,
+  "schema_version": 0,
   "prompt_template": "### Instruction:\n{instruction}\n\n### Response:\n{output}",
   "input_columns": {
     "instruction": "instruction",
     "output": "output"
   },
   "recommended_params": {
-    "training_mode": "按轮次 (Epochs)",
+    "training_mode": "epochs",
     "num_epochs": 3,
     "lora_r": 16,
     "lora_alpha": 32,

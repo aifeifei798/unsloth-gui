@@ -41,6 +41,8 @@ def _format_row(prompt_template: str, column_mappings: dict, row: dict, idx: int
         return drop_empty_sections(prompt_template.format(**fmt))
     except KeyError as e:
         raise ValueError(t("cfg.ds_tpl_key", key=e, need=sorted(fmt.keys()))) from e
+    except (IndexError, ValueError) as e:
+        raise ValueError(t("cfg.ds_tpl_bad", err=e)) from e
 
 
 def prepare_dataset(
@@ -48,6 +50,7 @@ def prepare_dataset(
     truncate_for_testing: bool = False,
     max_samples: int = 200,
     preview_only: bool = False,
+    preview_rows: int | None = None,
 ):
     """加载 + 格式化为带 text 列的数据集.
 
@@ -104,6 +107,10 @@ def prepare_dataset(
             texts.append(_format_row(prompt_template, column_mappings, row, i))
         return {"text": texts}
 
+    # 预览先切片再 map，避免为了看 2 行把整个数据集格式化一遍
+    if preview_rows is not None and len(dataset) > int(preview_rows):
+        dataset = dataset.select(range(int(preview_rows)))
+
     dataset = dataset.map(formatting_prompts_func, batched=True, remove_columns=None)
 
     if truncate_for_testing and len(dataset) > max_samples:
@@ -132,7 +139,7 @@ def combine_datasets(datasets: list):
 def dataset_preview_text(cfg: DatasetConfig, n: int = 3, max_chars: int = 1200) -> str:
     """UI 预览用：只读前 n 条格式化结果 + 列信息，不触发完整 map 全量开销过大时自动截断."""
     try:
-        ds = prepare_dataset(cfg, truncate_for_testing=True, max_samples=max(20, n))
+        ds = prepare_dataset(cfg, preview_rows=max(20, n))
     except Exception as e:
         return t("cfg.ds_preview_fail", err=e)
     lines = [

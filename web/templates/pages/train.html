@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t('web.page.train') }}</h1>
+    <p class="muted">{{ t('t.cfg')|replace('## ', '') }}</p>
+  </div>
+  <div class="row">
+    <span id="train-running-badge" class="badge badge-ghost hidden">{{ t('web.train.running') }}</span>
+    <button id="train-refresh" class="btn btn-sm" type="button">🔄 {{ t('web.refresh') }}</button>
+  </div>
+</div>
+
+<div id="train-warnings"></div>
+
+<div class="grid-2">
+  <section class="card bg-base-100 shadow-sm">
+    <div class="card-body stack">
+      <div class="grid-2-tight">
+        <div class="field">
+          <label for="train-exp">{{ t('t.exp_name') }}</label>
+          <input id="train-exp" class="input input-bordered w-full">
+        </div>
+        <label class="check-row mt-6">
+          <input id="train-resume" type="checkbox" class="checkbox checkbox-primary">
+          <span>{{ t('t.resume') }}</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="train-model">{{ t('t.model') }}</label>
+        <select id="train-model" class="select select-bordered w-full"></select>
+      </div>
+
+      <div class="field">
+        <label>{{ t('t.ds') }}</label>
+        <p class="muted">{{ t('t.ds_hint') }}</p>
+        <div id="train-datasets" class="multi-box tall"></div>
+      </div>
+
+      <div class="grid-2-tight">
+        <label class="check-row">
+          <input id="train-truncate" type="checkbox" class="checkbox checkbox-primary" checked>
+          <span>{{ t('t.truncate') }}</span>
+        </label>
+        <div class="field">
+          <label for="train-max-samples">{{ t('t.max_samples') }}</label>
+          <input id="train-max-samples" type="number" min="10" step="10" value="200"
+                 class="input input-bordered w-full">
+        </div>
+      </div>
+
+      <div class="grid-2-tight">
+        <div class="field">
+          <label for="train-lora-r">LoRA Rank (r)</label>
+          <input id="train-lora-r" type="number" min="1" step="4" value="8"
+                 class="input input-bordered w-full">
+        </div>
+        <div class="field">
+          <label for="train-lora-alpha">LoRA Alpha</label>
+          <input id="train-lora-alpha" type="number" min="1" step="4" value="16"
+                 class="input input-bordered w-full">
+        </div>
+      </div>
+
+      <div class="grid-2-tight">
+        <div class="field">
+          <label for="train-mode">{{ t('t.mode.label') }}</label>
+          <select id="train-mode" class="select select-bordered w-full">
+            <option value="steps">{{ t('t.mode.steps') }}</option>
+            <option value="epochs">{{ t('t.mode.epochs') }}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="train-save-steps">{{ t('t.save_steps') }}</label>
+          <input id="train-save-steps" type="number" min="1" step="10" value="50"
+                 class="input input-bordered w-full">
+        </div>
+      </div>
+
+      <div id="train-epochs-wrap" class="field hidden">
+        <label for="train-epochs">{{ t('t.epochs') }}</label>
+        <input id="train-epochs" type="number" min="0.1" step="0.1" value="1"
+               class="input input-bordered w-full">
+      </div>
+      <div id="train-steps-wrap" class="field">
+        <label for="train-steps">{{ t('t.steps') }}</label>
+        <input id="train-steps" type="number" min="1" step="10" value="100"
+               class="input input-bordered w-full">
+      </div>
+
+      <div class="grid-2-tight">
+        <div class="field">
+          <label for="train-batch">{{ t('t.batch') }}</label>
+          <input id="train-batch" type="number" min="1" step="1" value="1"
+                 class="input input-bordered w-full">
+        </div>
+        <div class="field">
+          <label for="train-grad">{{ t('t.grad') }}</label>
+          <input id="train-grad" type="number" min="1" step="1" value="8"
+                 class="input input-bordered w-full">
+        </div>
+      </div>
+
+      <div class="grid-2-tight">
+        <div class="field">
+          <label for="train-lr">{{ t('t.lr') }}</label>
+          <input id="train-lr" type="number" min="0.000001" step="0.00001" value="0.0002"
+                 class="input input-bordered w-full">
+        </div>
+        <div class="field">
+          <label for="train-seq">{{ t('t.seq') }}</label>
+          <input id="train-seq" type="number" min="256" step="256" value="2048"
+                 class="input input-bordered w-full">
+        </div>
+      </div>
+
+      <div id="train-reco" class="alert alert-info hidden"></div>
+      <div class="row">
+        <button id="train-start" class="btn btn-primary" type="button">▶ {{ t('t.start') }}</button>
+        <button id="train-stop" class="btn btn-error btn-outline" type="button" disabled>⏹ {{ t('t.stop') }}</button>
+      </div>
+      <div id="train-status" class="alert hidden"></div>
+    </div>
+  </section>
+
+  <div class="stack">
+    <section class="card bg-base-100 shadow-sm">
+      <div class="card-body stack">
+        <h2 class="card-title text-base">{{ t('web.train.progress') }}</h2>
+        <progress id="train-progress" class="progress progress-primary w-full"
+                  value="0" max="100"></progress>
+        <p id="train-progress-desc" class="muted"></p>
+        <div class="metrics">
+          <div class="metric"><span>{{ t('web.train.step') }}</span><strong id="metric-step">—</strong></div>
+          <div class="metric"><span>{{ t('web.train.loss') }}</span><strong id="metric-loss">—</strong></div>
+          <div class="metric"><span>{{ t('web.train.lr') }}</span><strong id="metric-lr">—</strong></div>
+          <div class="metric"><span>{{ t('web.train.epoch') }}</span><strong id="metric-epoch">—</strong></div>
+        </div>
+        <pre id="train-log" class="pre log-box tall"></pre>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 shadow-sm">
+      <div class="card-body stack">
+        <h2 class="card-title text-base">{{ t('t.tb')|replace('## ', '') }}</h2>
+        <div class="row">
+          <button id="train-tb" class="btn btn-sm" type="button">📈 {{ t('web.train.open_tb') }}</button>
+          <span id="train-tb-status" class="muted"></span>
+        </div>
+        <iframe id="train-tb-frame" class="tb-frame hidden" title="TensorBoard"></iframe>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/train.js"></script>
+{% endblock %}
