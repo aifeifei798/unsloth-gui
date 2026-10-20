@@ -64,6 +64,7 @@ class TrainIn(BaseModel):
     grad_accum: int = Field(default=8, ge=1)
     lr: float = Field(default=2e-4, gt=0)
     max_seq_length: int = Field(default=2048, ge=256)
+    use_chat_template: bool = True  # 用模型自带 chat 模板渲染训练文本
 
 
 class LoadIn(BaseModel):

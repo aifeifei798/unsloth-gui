@@ -212,6 +212,7 @@ class TrainRequest:
     grad_accum: int
     lr: float
     max_seq_length: int
+    use_chat_template: bool = True  # True=用模型自带 chat 模板，False=老 prompt_template
 
 
 def _safe_exp_name(name: str) -> str:
@@ -221,7 +222,7 @@ def _safe_exp_name(name: str) -> str:
 
 
 def _manifest_payload(req: TrainRequest, model_cfg, datasets_cfg, seq_len: int,
-                      status: str) -> dict:
+                      status: str, prompt_mode: str = "template") -> dict:
     templates: list[str] = []
     columns: list[dict] = []
     for cfg in datasets_cfg:
@@ -237,8 +238,12 @@ def _manifest_payload(req: TrainRequest, model_cfg, datasets_cfg, seq_len: int,
         "base_model_source": model_cfg.source,
         "datasets": [c.display_name for c in datasets_cfg],
         "dataset_columns": columns,
-        "prompt_template": templates[0] if len(templates) == 1 else "",
+        "prompt_mode": prompt_mode,
+        # chat 模式下最终文本由模型自带 chat 模板渲染，不写死 Instruction/Response 模板
+        "prompt_template": (templates[0] if len(templates) == 1 else "")
+        if prompt_mode == "template" else "",
         "prompt_templates": templates,
+        "chat_template": (getattr(model_cfg, "chat_template", None) or ""),
         "seq_len": int(seq_len),
         "training_mode": "epochs" if is_epoch_mode(req.training_mode) else "steps",
         "num_epochs": float(req.num_epochs),
@@ -294,7 +299,14 @@ def run_training(req: TrainRequest, progress=None,
             load_models_config,
             trainable_reason,
         )
-        from .dataset_utils import combine_datasets, prepare_dataset
+        from .dataset_utils import (
+            combine_datasets,
+            format_with_chat_template,
+            format_with_template,
+            has_chat_template,
+            load_raw_dataset,
+            supports_chat_roles,
+        )
 
         yield t("tr.prep_exp", exp=exp)
 
@@ -326,7 +338,7 @@ def run_training(req: TrainRequest, progress=None,
 
         _call_progress(progress, 0.1, t("tr.loading_data"))
         yield t("tr.loading_data")
-        all_ds = []
+        raw_ds = []
         selected_cfgs = []
         for name in req.selected_dataset_names:
             if _cancelled():
@@ -340,14 +352,14 @@ def run_training(req: TrainRequest, progress=None,
                 reason = trainable_reason(cfg) or t("tr.unprocessed", name=name)
                 yield t("tr.unprocessed_reason", name=name, reason=reason)
                 return
-            all_ds.append(prepare_dataset(cfg, req.truncate_dataset,
-                                          max_samples=req.max_samples))
+            # 先只加载原始数据：真正的格式化要等 tokenizer 到位（chat 模板模式）
+            raw_ds.append(load_raw_dataset(cfg, req.truncate_dataset,
+                                           max_samples=req.max_samples))
             selected_cfgs.append(cfg)
-        if not all_ds:
+        if not raw_ds:
             yield t("tr.no_valid_ds")
             return
-        combined = combine_datasets(all_ds)
-        yield t("tr.ready", n=len(combined), k=len(all_ds))
+        yield t("tr.ready", n=sum(len(d) for d in raw_ds), k=len(raw_ds))
 
         # 重型依赖最后才导入：前面的数据校验完全不需要 torch
         import torch
@@ -360,6 +372,7 @@ def run_training(req: TrainRequest, progress=None,
         except Exception:
             pass
         configure_hf_transfer(bool(model_cfg.fast_download))
+        import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
         from unsloth import FastLanguageModel
 
         _call_progress(progress, 0.3, t("tr.init_model", id=model_cfg.model_id))
@@ -379,9 +392,39 @@ def run_training(req: TrainRequest, progress=None,
             load_in_4bit=bool(model_cfg.load_in_4bit),
         )
         tokenizer = unwrap_text_tokenizer(tokenizer)
+        # 模型配置指定了 Unsloth 模板名（chatml / qwen-2.5 / llama-3.1 …）就用它，
+        # 否则用模型自带的 chat_template（与 Unsloth 官方用法一致）
+        if model_cfg.chat_template:
+            try:
+                from unsloth.chat_templates import get_chat_template
+                tokenizer = get_chat_template(
+                    tokenizer, chat_template=model_cfg.chat_template)
+            except Exception:
+                pass
         if _cancelled():
             yield t("tr.cancelled_before_start")
             return
+
+        # 决定最终训练文本格式：模型自带 chat 模板（新，默认）还是老 prompt_template
+        use_chat = bool(req.use_chat_template)
+        if use_chat and not has_chat_template(tokenizer):
+            yield t("tr.no_chat_template")
+            use_chat = False
+        if use_chat:
+            bad = [c.display_name for c in selected_cfgs if not supports_chat_roles(c)]
+            if bad:
+                yield t("tr.chat_fallback", names=", ".join(bad))
+                use_chat = False
+        prompt_mode = "chat_template" if use_chat else "template"
+        yield t("tr.prompt_mode", mode=prompt_mode)
+        formatted = []
+        for ds, cfg in zip(raw_ds, selected_cfgs):
+            if use_chat:
+                formatted.append(format_with_chat_template(ds, cfg, tokenizer))
+            else:
+                formatted.append(format_with_template(ds, cfg))
+        combined = combine_datasets(formatted)
+
         model = FastLanguageModel.get_peft_model(
             model,
             r=int(req.lora_r),
@@ -430,7 +473,7 @@ def run_training(req: TrainRequest, progress=None,
                 pass
         status = "stopped" if stopped else "completed"
         _write_manifest(output_dir, _manifest_payload(
-            req, model_cfg, selected_cfgs, seq_len, status))
+            req, model_cfg, selected_cfgs, seq_len, status, prompt_mode=prompt_mode))
 
         if stopped:
             ckpt = _find_latest_checkpoint(output_dir)

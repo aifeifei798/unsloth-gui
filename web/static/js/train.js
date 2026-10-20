@@ -127,6 +127,7 @@
       grad_accum: Number(qs('#train-grad').value || 8),
       lr: Number(qs('#train-lr').value || 0.0002),
       max_seq_length: Number(qs('#train-seq').value || 2048),
+      use_chat_template: qs('#train-chat-tpl').checked,
     };
   }
 

@@ -31,8 +31,12 @@ monitoring and chat on one page — no code, no hand-edited configs.
 | 💬 Test | Load a LoRA for streaming chat, tunable temperature/top-p, one-click unload to free VRAM |
 
 Unified format: 4 columns, `instruction / input / think / output`, each multi-selectable
-and joined top-down with newlines; no Input section when input is unmapped;
-final text is always Instruction / Input (optional) / Response, where
+and joined top-down with newlines; no Input section when input is unmapped.
+During training **user = instruction (+context) / assistant = reply (with think)**,
+and the final training text is rendered by the **model's own chat template**
+(`tokenizer.apply_chat_template`, the official Unsloth way); uncheck
+"Use the model's own chat template" on the Train page to fall back to the
+Instruction / Input (optional) / Response template.
 Response = think + output (`<think>` tags auto-added when missing);
 rows with empty replies are dropped and counted.
 

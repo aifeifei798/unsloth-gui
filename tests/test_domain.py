@@ -11,9 +11,15 @@ from src.config import (
     trainable_reason,
 )
 from src.dataprep import format_unified_row, resolve_mapping
-from src.dataset_utils import drop_empty_sections
+from src.dataset_utils import (
+    chat_messages_from_row,
+    drop_empty_sections,
+    has_chat_template,
+    render_chat_text,
+    supports_chat_roles,
+)
 from src.i18n import check_parity
-from src.inference_utils import _headers_from_template, _render_prompt
+from src.inference_utils import _build_chat_prompt, _headers_from_template, _render_prompt
 from src.model_utils import configure_hf_transfer, unwrap_text_tokenizer
 
 
@@ -103,6 +109,66 @@ def test_inference_prompt_without_input_section():
     assert "sys" in prompt
     assert "### Input:" not in prompt
     assert prompt.rstrip().endswith("### Response:")
+
+
+class _FakeChatTokenizer:
+    """极简 chat 模板 tokenizer：不依赖 transformers。"""
+
+    chat_template = "fake-template"
+
+    def apply_chat_template(self, messages, tokenize=False,
+                            add_generation_prompt=False, **kwargs):
+        out = "".join(f"<|{m['role']}|>{m['content']}" for m in messages)
+        if add_generation_prompt:
+            out += "<|assistant|>"
+        return out
+
+    def __call__(self, text, add_special_tokens=False, **kwargs):
+        return {"input_ids": list(range(max(1, len(text) // 4)))}
+
+
+def test_chat_messages_from_row_merges_input():
+    row = {"instruction": "问", "input": "上下文", "output": "<think>想</think>\n答"}
+    mapping = {"instruction": "instruction", "input": "input", "output": "output"}
+    msgs = chat_messages_from_row(row, mapping)
+    assert msgs == [
+        {"role": "user", "content": "问\n\n上下文"},
+        {"role": "assistant", "content": "<think>想</think>\n答"},
+    ]
+
+
+def test_chat_messages_from_row_requires_output():
+    mapping = {"instruction": "instruction", "output": "output"}
+    try:
+        chat_messages_from_row({"instruction": "问", "output": "  "}, mapping)
+    except ValueError as e:
+        assert "output" in str(e).lower() or "输出" in str(e)
+    else:
+        raise AssertionError("空输出应当报错")
+
+
+def test_render_chat_text_uses_model_template():
+    tok = _FakeChatTokenizer()
+    assert has_chat_template(tok) is True
+    assert has_chat_template(object()) is False
+    msgs = [{"role": "user", "content": "hi"}]
+    assert render_chat_text(tok, msgs) == "<|user|>hi"
+    assert render_chat_text(tok, msgs, add_generation_prompt=True) == \
+        "<|user|>hi<|assistant|>"
+
+
+def test_supports_chat_roles():
+    assert supports_chat_roles(_cfg()) is True
+    assert supports_chat_roles(_cfg(input_columns={"output": "output"})) is False
+
+
+def test_build_chat_prompt_ends_with_generation_prompt():
+    tok = _FakeChatTokenizer()
+    prompt, out_tokens = _build_chat_prompt(tok, [], "hello", "", 2048, 64)
+    assert prompt == "<|user|>hello<|assistant|>"
+    assert out_tokens == 64
+    prompt, _ = _build_chat_prompt(tok, [], "hello", "sys", 2048, 64)
+    assert prompt.startswith("<|system|>sys")
 
 
 def test_configure_hf_transfer(monkeypatch):

@@ -28,7 +28,9 @@
 | 💬 测试 | 载入 LoRA 流式对话，温度/top-p 等可调，一键卸载腾显存 |
 
 统一数据格式：`instruction / input / think / output` 四列，多列换行拼接；
-最终训练文本恒为 Instruction / Input（可选）/ Response，其中
+训练时 **user=指令(+上下文) / assistant=回复(含 think)**，最终训练文本由**模型自带的
+chat 模板**渲染（`tokenizer.apply_chat_template`，Unsloth 官方用法）；训练页可关掉
+「使用模型自带对话模板」退回 Instruction / Input（可选）/ Response 模板。
 Response = think + output（think 缺 `<think>` 标签自动套上）；
 空回复行自动丢弃。**只有数据处理 Tab 产出的统一数据（`processed=true`、schema v3、
 产物目录存在）才会出现在训练下拉里**；示例 `datasets_config/sunwukong.json`

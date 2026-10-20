@@ -33,7 +33,7 @@ src/
   i18n.py              # t(key, **params)，缺键回退中文；check_parity() 查 key 对齐
   model_utils.py       # 多模态 Processor 解包为纯文本 Tokenizer；hf_transfer 开关
   config.py            # 模型/数据集配置加载、校验、来源解析（local/hf/modelscope）
-  dataset_utils.py     # 训练格式化、空段清理、多数据集合并
+  dataset_utils.py     # 训练格式化（prompt_template / chat 模板两种模式）、空段清理、多数据集合并
   dataprep.py          # 数据处理：预览、映射、统一数据生成（schema v3）
   data_mgmt.py         # 数据管理：详情、重命名、删除（只删生成物）
   train_utils.py       # 后台训练、可取消、断点续训、run manifest（重型依赖延迟导入）
@@ -52,21 +52,27 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
 2. **统一格式**：`instruction / input / think / output`，Response = think + output，
    think 缺 `<think>` 标签自动套；模板无 Input 段当 input 为空；空段由
    `drop_empty_sections` 清理——三处文本出口（训练/单行预览/生成预览）必须共用它。
-3. **纯文本单路径**：不要加 vision/多模态分支（已明确砍掉，见 git 历史）。
-4. **文案禁硬编码**：所有用户可见中文/英文走 `t()` + locales 双文件同步加 key。
+3. **训练文本默认走模型自带 chat 模板**：新训练用 `tokenizer.apply_chat_template`
+   （Unsloth 官方用法）渲染 user=指令(+上下文)/assistant=回复，训练页可关掉退回
+   `prompt_template`；**训练与推理格式必须一致**——manifest 记 `prompt_mode`
+   （chat_template / template）与 `chat_template`（模板名），推理端按 manifest 还原，
+   老 manifest 没有 `prompt_mode` 就走老模板路径。
+4. **纯文本单路径**：不要加 vision/多模态分支（已明确砍掉，见 git 历史）。
+5. **文案禁硬编码**：所有用户可见中文/英文走 `t()` + locales 双文件同步加 key。
    Web 模板由 Jinja 注入 `window.I18N`，前端 JS 一律用 `t('key')`，不要硬编码中文。
-5. **重型依赖延迟导入**：`torch / unsloth / trl / transformers / datasets / peft`
+6. **重型依赖延迟导入**：`torch / unsloth / trl / transformers / datasets / peft`
    只许在函数内 import，模块顶层保持 stdlib-only（UI 无 GPU 也能打开）。
-6. **服务统一走 `server.sh`**：启动/停止/重启/状态/日志都用它；PID 与日志在 `.run/`，
+   进程里 `unsloth` 必须早于 `transformers` 导入，否则 Unsloth 优化不生效。
+7. **服务统一走 `server.sh`**：启动/停止/重启/状态/日志都用它；PID 与日志在 `.run/`，
    不要手工 `nohup python -m web` 起第二份。安装统一走 `install.sh`。
-7. **删数据只删生成物**：`local_data/processed/<name>/` + 对应 config JSON；
+8. **删数据只删生成物**：`local_data/processed/<name>/` + 对应 config JSON；
    原始上传、自带示例永远不动。删模型至少保留一个。
-8. **配置文件原子写**：统一走 `src/storage.py` 的 tmp + replace。
-9. **Web 单进程单 worker**：训练与推理互斥，不要引入多 worker / 多进程共享显存；
-   后台任务统一走 `web/jobs.py`，训练和数据生成进度用 SSE，聊天用 WebSocket。
-10. **Web 职责边界**：路由只做校验、参数转换、调用 `src/`；领域逻辑不要写进
+9. **配置文件原子写**：统一走 `src/storage.py` 的 tmp + replace。
+10. **Web 单进程单 worker**：训练与推理互斥，不要引入多 worker / 多进程共享显存；
+    后台任务统一走 `web/jobs.py`，训练和数据生成进度用 SSE，聊天用 WebSocket。
+11. **Web 职责边界**：路由只做校验、参数转换、调用 `src/`；领域逻辑不要写进
     `web/routers/`，也不要复制一份到前端 JS。前端不引入 React/Vue，不需要 Node 构建。
-11. **SSE/WS 约定**：事件名固定为 `state / progress / log / metrics / done / error /
+12. **SSE/WS 约定**：事件名固定为 `state / progress / log / metrics / done / error /
     cancelled / end`；任务结束前必须发 `done` 或 `error`/`cancelled`，最后发 `end`。
     晚订阅/重连要能从 `job.events` 补发，`Last-Event-ID` 语义不要破坏。
 

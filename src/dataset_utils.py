@@ -45,27 +45,23 @@ def _format_row(prompt_template: str, column_mappings: dict, row: dict, idx: int
         raise ValueError(t("cfg.ds_tpl_bad", err=e)) from e
 
 
-def prepare_dataset(
+def load_raw_dataset(
     cfg: DatasetConfig,
     truncate_for_testing: bool = False,
     max_samples: int = 200,
-    preview_only: bool = False,
     preview_rows: int | None = None,
 ):
-    """加载 + 格式化为带 text 列的数据集.
+    """只加载原始数据（不套模板）。
 
-    - 本地：优先 load_from_disk；若是 .jsonl/.json 文件则自动转换（替代原来必须手动跑 convert_data.py）
+    训练要先拿到模型 tokenizer 才能决定用哪种格式渲染，所以拆成
+    「加载」和「格式化」两步；预览仍走 prepare_dataset 一步到位。
+
+    - 本地：优先 load_from_disk；若是 .jsonl/.json/.csv/.txt 文件则自动转换
     - 远端：load_dataset(dataset_id, split)
-    - 返回 HF datasets.Dataset（带 text 列）
     """
     from datasets import load_dataset, load_from_disk
 
     ds_path = cfg.resolved_dataset_id()
-    missing = validate_template_columns(cfg)
-    if missing:
-        raise ValueError(t("cfg.tpl_missing", name=cfg.display_name, missing=missing,
-                           keys=sorted(cfg.input_columns.keys())))
-
     p = Path(ds_path)
     if p.exists():
         if p.is_dir():
@@ -91,6 +87,19 @@ def prepare_dataset(
         # DatasetDict：优先取 cfg.split，否则取第一个切分
         dataset = dataset[cfg.split] if cfg.split in dataset else dataset[list(dataset.keys())[0]]
 
+    if preview_rows is not None and len(dataset) > int(preview_rows):
+        dataset = dataset.select(range(int(preview_rows)))
+    if truncate_for_testing and len(dataset) > int(max_samples):
+        dataset = dataset.select(range(int(max_samples)))
+    return dataset
+
+
+def format_with_template(dataset, cfg: DatasetConfig):
+    """套 cfg.prompt_template 渲染成 text 列（老模式：### Instruction / ### Response）。"""
+    missing = validate_template_columns(cfg)
+    if missing:
+        raise ValueError(t("cfg.tpl_missing", name=cfg.display_name, missing=missing,
+                           keys=sorted(cfg.input_columns.keys())))
     prompt_template = cfg.prompt_template
     column_mappings = cfg.input_columns
 
@@ -107,15 +116,109 @@ def prepare_dataset(
             texts.append(_format_row(prompt_template, column_mappings, row, i))
         return {"text": texts}
 
-    # 预览先切片再 map，避免为了看 2 行把整个数据集格式化一遍
-    if preview_rows is not None and len(dataset) > int(preview_rows):
-        dataset = dataset.select(range(int(preview_rows)))
+    return dataset.map(formatting_prompts_func, batched=True, remove_columns=None)
 
-    dataset = dataset.map(formatting_prompts_func, batched=True, remove_columns=None)
 
-    if truncate_for_testing and len(dataset) > max_samples:
-        dataset = dataset.select(range(max_samples))
-    return dataset
+def prepare_dataset(
+    cfg: DatasetConfig,
+    truncate_for_testing: bool = False,
+    max_samples: int = 200,
+    preview_only: bool = False,
+    preview_rows: int | None = None,
+):
+    """加载 + 用 prompt_template 格式化为带 text 列的数据集（预览 / 老模式训练）。"""
+    dataset = load_raw_dataset(cfg, truncate_for_testing, max_samples, preview_rows)
+    return format_with_template(dataset, cfg)
+
+
+# ---------------------------------------------------------------- chat 模板模式
+
+def has_chat_template(tokenizer) -> bool:
+    """tokenizer 是否带可用的对话模板（模型自带的格式）。"""
+    if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
+        return False
+    try:
+        return bool(getattr(tokenizer, "chat_template", None))
+    except Exception:
+        return False
+
+
+def supports_chat_roles(cfg: DatasetConfig) -> bool:
+    """数据集映射里是否齐了 chat 模式需要的角色（instruction / output）。"""
+    keys = set((cfg.input_columns or {}).keys())
+    return "instruction" in keys and "output" in keys
+
+
+def render_chat_text(tokenizer, messages, add_generation_prompt: bool = False,
+                     enable_thinking=None) -> str:
+    """用模型自带 chat 模板把 messages 渲染成纯文本。"""
+    if not hasattr(tokenizer, "apply_chat_template"):
+        raise ValueError(t("cfg.no_chat_template"))
+    kwargs: dict = dict(tokenize=False, add_generation_prompt=bool(add_generation_prompt))
+    if enable_thinking is not None:
+        kwargs["enable_thinking"] = bool(enable_thinking)
+    try:
+        text = tokenizer.apply_chat_template(messages, **kwargs)
+    except Exception as e:
+        if "enable_thinking" in kwargs:
+            kwargs.pop("enable_thinking")
+            try:
+                text = tokenizer.apply_chat_template(messages, **kwargs)
+            except Exception as e2:
+                raise ValueError(t("cfg.chat_tpl_fail", err=e2)) from e2
+        else:
+            raise ValueError(t("cfg.chat_tpl_fail", err=e)) from e
+    text = "" if text is None else str(text)
+    if not text.strip():
+        raise ValueError(t("cfg.chat_tpl_empty"))
+    return text
+
+
+def chat_messages_from_row(row: dict, column_mappings: dict, idx: int = 0,
+                           name: str = "") -> list[dict]:
+    """统一数据的一行 → chat messages：user=指令(+上下文)，assistant=回复(含思考)。"""
+    def pick(role: str) -> str:
+        col = (column_mappings or {}).get(role)
+        if not col:
+            return ""
+        if col not in row:
+            raise ValueError(t("cfg.ds_col_missing", i=idx, col=col, ph=role,
+                               actual=sorted(row.keys())))
+        v = row[col]
+        return "" if v is None else str(v).strip()
+
+    instruction = pick("instruction")
+    context = pick("input")
+    answer = pick("output")
+    if not answer:
+        raise ValueError(t("cfg.ds_empty_output", name=name, i=idx))
+    user = instruction
+    if context:
+        user = (user + "\n\n" + context) if user else context
+    return [{"role": "user", "content": user},
+            {"role": "assistant", "content": answer}]
+
+
+def format_with_chat_template(dataset, cfg: DatasetConfig, tokenizer):
+    """用模型自带 chat 模板渲染成 text 列（新模式，训练与推理格式一致）。"""
+    column_mappings = cfg.input_columns
+    if not column_mappings:
+        raise ValueError(t("cfg.ds_bad_columns", name=cfg.display_name))
+
+    def formatting_func(examples):
+        cols = list(column_mappings.values())
+        for c in cols:
+            if c not in examples:
+                raise ValueError(t("cfg.ds_need_col", name=cfg.display_name, col=c,
+                                   actual=sorted(examples.keys())))
+        texts = []
+        for i in range(len(examples[cols[0]])):
+            row = {c: examples[c][i] for c in cols}
+            messages = chat_messages_from_row(row, column_mappings, i, cfg.display_name)
+            texts.append(render_chat_text(tokenizer, messages))
+        return {"text": texts}
+
+    return dataset.map(formatting_func, batched=True, remove_columns=None)
 
 
 def combine_datasets(datasets: list):

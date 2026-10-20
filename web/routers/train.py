@@ -84,6 +84,7 @@ async def start(body: TrainIn):
         grad_accum=int(body.grad_accum),
         lr=float(body.lr),
         max_seq_length=int(body.max_seq_length),
+        use_chat_template=bool(body.use_chat_template),
     )
 
     def worker(job):

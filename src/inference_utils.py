@@ -26,6 +26,7 @@ _gen_lock = threading.Lock()
 _mgr: dict = {
     "model": None, "tokenizer": None, "base": None, "lora": None,
     "base_model_id": None, "seq_len": 2048, "prompt_template": "",
+    "prompt_mode": "template",
     "cancel_event": None,
 }
 
@@ -72,6 +73,7 @@ def lora_info(lora_name: str) -> dict:
         "seq_len": man.get("seq_len", ""),
         "datasets": man.get("datasets", []),
         "status": man.get("status", ""),
+        "prompt_mode": man.get("prompt_mode", "template"),
         "has_manifest": bool(man),
     }
     return out
@@ -90,6 +92,7 @@ def loaded_payload() -> dict:
         "lora": _mgr["lora"],
         "seq_len": _mgr["seq_len"],
         "has_template": bool(_mgr.get("prompt_template")),
+        "prompt_mode": _mgr.get("prompt_mode", "template"),
     }
 
 
@@ -100,6 +103,7 @@ def unload_model() -> str:
     with _mgr_lock:
         _mgr.update(model=None, tokenizer=None, base=None, lora=None,
                     base_model_id=None, seq_len=2048, prompt_template="",
+                    prompt_mode="template",
                     cancel_event=None)
     gc.collect()
     try:
@@ -206,6 +210,70 @@ def _build_prompt(tokenizer, history: list, user_input: str, system_prompt: str,
     return prompt, out_tokens
 
 
+# ------------------------------------------------------------ chat 模板模式
+
+def _chat_messages(history: list, user_input: str, system_prompt: str) -> list[dict]:
+    """历史 + 本轮输入 → chat messages（与训练时同一套角色）。"""
+    messages: list[dict] = []
+    system = (system_prompt or "").strip()
+    if system:
+        messages.append({"role": "system", "content": system})
+    for m in history or []:
+        role = m.get("role")
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": (user_input or "").strip()})
+    return messages
+
+
+def _render_chat_prompt(tokenizer, history: list, user_input: str,
+                        system_prompt: str) -> str:
+    """用模型自带 chat 模板渲染「轮到模型说话」的提示词。
+
+    enable_thinking=True 时提示词停在 `<think>` 开头，和训练文本里
+    assistant 段（<think>…</think>）的写法对齐。
+    """
+    from .dataset_utils import render_chat_text
+
+    messages = _chat_messages(history, user_input, system_prompt)
+    return render_chat_text(tokenizer, messages, add_generation_prompt=True,
+                            enable_thinking=True)
+
+
+def _chat_stop_string(tokenizer) -> str:
+    """从模板里反推 assistant 起始标记，用作停止串（模型自己开新一轮就停）。"""
+    try:
+        probe = [{"role": "user", "content": "x"}]
+        base = tokenizer.apply_chat_template(probe, tokenize=False)
+        gen = tokenizer.apply_chat_template(probe, tokenize=False,
+                                            add_generation_prompt=True)
+        diff = str(gen)[len(str(base)):]
+        first = diff.splitlines()[0].strip() if diff else ""
+        return first if 0 < len(first) <= 64 else ""
+    except Exception:
+        return ""
+
+
+def _build_chat_prompt(tokenizer, history: list, user_input: str,
+                       system_prompt: str, max_seq_len: int,
+                       max_new_tokens: int) -> tuple[str, int]:
+    """chat 模板模式：按 token 预算丢历史，返回 (prompt, 实际 max_new_tokens)."""
+    budget = max(64, int(max_seq_len) - int(max_new_tokens) - 8)
+    turns = list(history or [])
+    while True:
+        prompt = _render_chat_prompt(tokenizer, turns, user_input, system_prompt)
+        n = _token_len(tokenizer, prompt)
+        if n <= budget or not turns:
+            break
+        drop = 0
+        while drop < len(turns) and drop < 2:
+            drop += 1
+        turns = turns[drop:]
+    out_tokens = max(1, min(int(max_new_tokens), int(max_seq_len) - n - 2))
+    return prompt, out_tokens
+
+
 class _CancelCriteria:
     """transformers StoppingCriteria 的鸭子类型版本，避免顶层 import torch."""
 
@@ -242,9 +310,15 @@ def stream_chat(user_input: str, history: Optional[list], system_prompt: str,
         ins_header, resp_header, has_input = _headers_from_template(
             _mgr.get("prompt_template") or "")
         max_seq_len = int(_mgr.get("seq_len") or 2048)
-        prompt, out_tokens = _build_prompt(
-            tokenizer, list(history or []), text, system_prompt,
-            ins_header, resp_header, has_input, max_seq_len, max_new_tokens)
+        chat_mode = (_mgr.get("prompt_mode") or "template") == "chat_template"
+        if chat_mode:
+            prompt, out_tokens = _build_chat_prompt(
+                tokenizer, list(history or []), text, system_prompt,
+                max_seq_len, max_new_tokens)
+        else:
+            prompt, out_tokens = _build_prompt(
+                tokenizer, list(history or []), text, system_prompt,
+                ins_header, resp_header, has_input, max_seq_len, max_new_tokens)
 
         inputs = tokenizer(prompt, return_tensors="pt")
         try:
@@ -281,7 +355,13 @@ def stream_chat(user_input: str, history: Optional[list], system_prompt: str,
             gen_kwargs["do_sample"] = False
         # 只把“下一轮 Instruction”当停止符。把 Response 也放进 stop_strings，
         # 某些模型第一 token 就复读标题，会立刻截断成空回复。
-        gen_kwargs["stop_strings"] = [ins_header]
+        # chat 模板模式改成「模型自己开新一轮 assistant」时停。
+        if chat_mode:
+            stop = _chat_stop_string(tokenizer)
+            if stop:
+                gen_kwargs["stop_strings"] = [stop]
+        else:
+            gen_kwargs["stop_strings"] = [ins_header]
 
         errors: list[BaseException] = []
 
@@ -352,6 +432,14 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
     seq_len = int(manifest.get("seq_len") or getattr(model_cfg, "max_seq_length", 2048)
                   or 2048)
     template = manifest.get("prompt_template") or ""
+    # 老 manifest 没有 prompt_mode → 仍按 prompt_template 还原；新训练走 chat 模板
+    prompt_mode = "chat_template" if manifest.get("prompt_mode") == "chat_template" \
+        else "template"
+    # 模板名以 manifest 为准（老 manifest 没有这个字段才回退模型配置）
+    if "chat_template" in manifest:
+        chat_template_name = manifest.get("chat_template") or ""
+    else:
+        chat_template_name = getattr(model_cfg, "chat_template", None) or ""
     warning = ""
     if manifest.get("base_model_display") and manifest["base_model_display"] != base_model_name:
         warning = "\n" + t("inf.base_mismatch",
@@ -359,13 +447,14 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
     elif manifest.get("base_model") and model_cfg.model_id != manifest["base_model"]:
         warning = "\n" + t("inf.base_mismatch",
                            want=manifest["base_model"], got=model_cfg.model_id)
-    if not template and manifest.get("prompt_templates"):
+    if not template and manifest.get("prompt_templates") and prompt_mode == "template":
         warning += "\n" + t("inf.template_ambiguous")
 
     with _mgr_lock:
         # 先卸旧模型防 OOM
         _mgr.update(model=None, tokenizer=None, base=None, lora=None,
                     base_model_id=None, seq_len=2048, prompt_template="",
+                    prompt_mode="template",
                     cancel_event=None)
         gc.collect()
         try:
@@ -381,6 +470,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 except Exception:
                     pass
             configure_hf_transfer(bool(model_cfg.fast_download))
+            import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
             from unsloth import FastLanguageModel
 
             try:
@@ -393,11 +483,11 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 load_in_4bit=bool(model_cfg.load_in_4bit),
             )
             tokenizer = unwrap_text_tokenizer(tokenizer)
-            if getattr(model_cfg, "chat_template", None):
+            if chat_template_name:
                 try:
                     from unsloth.chat_templates import get_chat_template
                     tokenizer = get_chat_template(
-                        tokenizer, chat_template=model_cfg.chat_template)
+                        tokenizer, chat_template=chat_template_name)
                 except Exception:
                     pass
             if progress is not None:
@@ -426,6 +516,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
             _mgr.update(model=model, tokenizer=tokenizer, base=base_model_name,
                         lora=lora_name, base_model_id=model_cfg.model_id,
                         seq_len=seq_len, prompt_template=template,
+                        prompt_mode=prompt_mode,
                         cancel_event=None)
             return t("inf.loaded", name=lora_name) + warning
         except Exception as e:

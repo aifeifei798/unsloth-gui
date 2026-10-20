@@ -99,6 +99,7 @@
     if (info.base_model_display) lines.push(t('web.chat.trained_base') + ': ' + info.base_model_display);
     if (info.seq_len) lines.push('seq_len: ' + info.seq_len);
     if (info.datasets && info.datasets.length) lines.push(t('web.chat.trained_data') + ': ' + info.datasets.join(', '));
+    if (info.prompt_mode) lines.push(t('web.chat.prompt_mode') + ': ' + info.prompt_mode);
     if (info.status) lines.push(t('web.common.status') + ': ' + info.status);
     if (!info.has_manifest) lines.push(t('web.chat.no_manifest'));
     box.textContent = lines.join('\n');
