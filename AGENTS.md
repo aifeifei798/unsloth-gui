@@ -80,6 +80,10 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
     模型管理、数据管理、界面语言都在「设置」页的子 tab 里。子 tab 切换统一用
     `common.js` 的 `initTabs`（按钮 `data-tab`、面板 `data-panel`），别再各写一套。
     老链接 `/models`、`/datasets` 保持 302 跳 `/settings`。
+14. **样式坑**：DaisyUI 自带的 `.stack` 是「图片叠放」网格（子元素会重叠在同一格），
+    app.css 已把它覆盖成 flex 竖排；DaisyUI **不带 Tailwind 工具类**，模板里用到的
+    `flex-1 / w-full / gap-2 / mb-2 / mb-3 / mt-2 / text-sm / text-base` 等由 app.css
+    补齐——别再引入别的 Tailwind 类名（写了也不生效）。
 
 ## 改完必须跑（本机无 GPU，所有验证都不需要 torch）
 
