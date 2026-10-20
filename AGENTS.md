@@ -85,9 +85,12 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
     `flex-1 / w-full / gap-2 / mb-2 / mb-3 / mt-2 / text-sm / text-base` 等由 app.css
     补齐——别再引入别的 Tailwind 类名（写了也不生效）。
 15. **Unsloth 启动开销**：`from_pretrained` 里有两笔固定开销——`get_statistics()`
-    联网体检（慢代理下 ~76s，本项目默认 `UNSLOTH_DISABLE_STATISTICS=1` 关掉）和
-    24 层 decoder 的 `torch.compile`（~30s，`UNSLOTH_BLOCK_COMPILE=0` 可关但每步更慢）。
-    改训练/推理加载路径时，**先调 `src/model_utils.py::configure_unsloth_env`**，
+    联网体检（慢代理下 ~76s）和 24 层 decoder 的 `torch.compile`（~30s，
+    `UNSLOTH_BLOCK_COMPILE=0` 可关但每步更慢）。体检已被本项目**堵死**：
+    `configure_unsloth_env()` 设 `UNSLOTH_DISABLE_STATISTICS=1`，
+    `block_unsloth_statistics()` 再把 Unsloth 里所有 `get_statistics` 入口换成空实现
+    （它是 `from ._utils import *` 绑定的，只设环境变量不够）。放行开关是
+    `UNSLOTH_GUI_ALLOW_STATISTICS=1`。改训练/推理加载路径时统一走这两个函数，
     别自己在别处设这些环境变量。
 
 ## 改完必须跑（本机无 GPU，所有验证都不需要 torch）

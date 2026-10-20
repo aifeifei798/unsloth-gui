@@ -24,6 +24,7 @@ from typing import Generator, Optional
 
 from .i18n import t
 from .model_utils import (
+    block_unsloth_statistics,
     configure_hf_transfer,
     configure_unsloth_env,
     sanitize_proxy_env,
@@ -383,6 +384,7 @@ def run_training(req: TrainRequest, progress=None,
         configure_unsloth_env()  # 跳过 Unsloth 的联网体检（慢且没用）
         sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
         import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
+        block_unsloth_statistics()  # 再堵一次：Unsloth 内部是 import * 绑定的
         from unsloth import FastLanguageModel
 
         _call_progress(progress, 0.3, t("tr.init_model", id=model_cfg.model_id))

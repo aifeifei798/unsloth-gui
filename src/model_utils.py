@@ -51,9 +51,46 @@ def configure_unsloth_env() -> None:
     Unsloth 每次 from_pretrained 都会跑 get_statistics()：起子进程去 HuggingFace
     下载一个 README，看「HF 是不是挂了」（见 unsloth/models/_utils.py）。
     代理慢的时候这一步要 1~2 分钟（实测 76 秒），和训练本身毫无关系。
-    UNSLOTH_DISABLE_STATISTICS=1 直接跳过；用户自己设过就不动。
+    UNSLOTH_DISABLE_STATISTICS=1 直接跳过；这里强制写死，不给环境变量开回去的余地
+    （真要开，用 UNSLOTH_GUI_ALLOW_STATISTICS=1）。
     """
-    os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
+    if os.environ.get("UNSLOTH_GUI_ALLOW_STATISTICS", "0") == "1":
+        return
+    os.environ["UNSLOTH_DISABLE_STATISTICS"] = "1"
+
+
+def _statistics_noop(*args, **kwargs) -> None:
+    """Unsloth 联网体检的空实现。"""
+    return None
+
+
+def block_unsloth_statistics(modules=None) -> int:
+    """把 Unsloth 的联网体检彻底堵死，返回被替换的入口数。
+
+    光设 UNSLOTH_DISABLE_STATISTICS 不够：Unsloth 内部是
+    `from ._utils import *`（导入时就把名字绑好了），所以要把所有带
+    get_statistics 属性的 unsloth 模块都替换掉。必须在 import unsloth 之后调用。
+
+    这只影响遥测和「HF 是否挂了」的探测，不影响加载 / 训练 / 推理。
+    """
+    if modules is None:
+        import sys
+        modules = list(sys.modules.values())
+    patched = 0
+    for mod in modules:
+        if mod is None:
+            continue
+        name = getattr(mod, "__name__", "") or ""
+        if not name.startswith("unsloth"):
+            continue
+        if getattr(mod, "get_statistics", None) is None:
+            continue
+        try:
+            setattr(mod, "get_statistics", _statistics_noop)
+            patched += 1
+        except Exception:
+            continue
+    return patched
 
 
 def unwrap_text_tokenizer(tokenizer):

@@ -97,12 +97,17 @@ pip install -r requirements.txt -r requirements-web.txt
 | 阶段 | 默认 | 关掉后 |
 | --- | --- | --- |
 | `import unsloth`（Zoo 打补丁） | ~10s | 一样 |
-| **`get_statistics()` 联网体检**（子进程去 HF 下 README 看服务是否挂） | **~76s（慢代理下更久）** | **默认已关**（`UNSLOTH_DISABLE_STATISTICS=1`） |
+| **`get_statistics()` 联网体检**（子进程去 HF 下 README 看服务是否挂） | **~76s（慢代理下更久）** | **默认已堵死**（设 `UNSLOTH_DISABLE_STATISTICS=1` + 把 `get_statistics` 换成空实现） |
 | 24 层 decoder 的 `torch.compile` | ~30s | `UNSLOTH_BLOCK_COMPILE=0` 可关，但每步会慢一点 |
 | 权重加载 + 首次前向 | ~35s | 一样 |
 
-本项目默认设了 `UNSLOTH_DISABLE_STATISTICS=1`（那步只是查 HF 通不通，跟训练无关）；
-想更省启动时间可以再设 `UNSLOTH_BLOCK_COMPILE=0`：
+本项目默认设了 `UNSLOTH_DISABLE_STATISTICS=1`（那步只是查 HF 通不通，跟训练无关），
+并且在 `import unsloth` 之后把 Unsloth 内部所有 `get_statistics` 入口换成空实现
+（它是 `from ._utils import *` 绑定的，只设环境变量不够硬），彻底堵死；
+真要临时放行体检：`UNSLOTH_GUI_ALLOW_STATISTICS=1 ./server.sh start`。
+
+想再省启动时间可以设 `UNSLOTH_BLOCK_COMPILE=0`（跳过 24 层 decoder 的 torch.compile，
+代价是每步慢一点）：
 
 ```bash
 UNSLOTH_BLOCK_COMPILE=0 ./server.sh start

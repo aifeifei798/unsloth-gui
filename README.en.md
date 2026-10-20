@@ -113,13 +113,19 @@ Unsloth overhead. Measured on an RTX 5090 D with Qwen3.5-0.8B:
 | Stage | Default | Turned off |
 | --- | --- | --- |
 | `import unsloth` (Zoo patching) | ~10s | same |
-| **`get_statistics()` health probe** (subprocess downloads a README from HF to check it is up) | **~76s (worse on a slow proxy)** | **off by default** (`UNSLOTH_DISABLE_STATISTICS=1`) |
+| **`get_statistics()` health probe** (subprocess downloads a README from HF to check it is up) | **~76s (worse on a slow proxy)** | **blocked by default** (`UNSLOTH_DISABLE_STATISTICS=1` + `get_statistics` replaced with a no-op) |
 | `torch.compile` of the 24 decoder blocks | ~30s | `UNSLOTH_BLOCK_COMPILE=0`, but each step gets slower |
 | Weight load + first forward | ~35s | same |
 
 This project sets `UNSLOTH_DISABLE_STATISTICS=1` by default (the probe only
-checks whether HF is reachable, it has nothing to do with training). For an
-even quicker start, add `UNSLOTH_BLOCK_COMPILE=0`:
+checks whether HF is reachable, it has nothing to do with training) and, right
+after `import unsloth`, replaces every `get_statistics` entry point with a no-op
+(Unsloth binds them with `from ._utils import *`, so the env var alone is not
+enough). To let the probe through for one run:
+`UNSLOTH_GUI_ALLOW_STATISTICS=1 ./server.sh start`.
+
+For an even quicker start, add `UNSLOTH_BLOCK_COMPILE=0` (skips the
+`torch.compile` of the 24 decoder blocks, but each step gets slower):
 
 ```bash
 UNSLOTH_BLOCK_COMPILE=0 ./server.sh start

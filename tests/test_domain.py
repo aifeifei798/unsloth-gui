@@ -21,6 +21,7 @@ from src.dataset_utils import (
 from src.i18n import check_parity
 from src.inference_utils import _build_chat_prompt, _headers_from_template, _render_prompt
 from src.model_utils import (
+    block_unsloth_statistics,
     configure_hf_transfer,
     configure_unsloth_env,
     sanitize_proxy_env,
@@ -201,10 +202,29 @@ def test_configure_unsloth_env_disables_statistics(monkeypatch):
     monkeypatch.delenv("UNSLOTH_DISABLE_STATISTICS", raising=False)
     configure_unsloth_env()
     assert os.environ["UNSLOTH_DISABLE_STATISTICS"] == "1"
-    # 用户自己设过就别覆盖
+    # 用户自己设过也别覆盖（要开回体检得用 UNSLOTH_GUI_ALLOW_STATISTICS）
     monkeypatch.setenv("UNSLOTH_DISABLE_STATISTICS", "0")
     configure_unsloth_env()
-    assert os.environ["UNSLOTH_DISABLE_STATISTICS"] == "0"
+    assert os.environ["UNSLOTH_DISABLE_STATISTICS"] == "1"
+    # 显式放行时我们完全不接管这个变量
+    monkeypatch.setenv("UNSLOTH_GUI_ALLOW_STATISTICS", "1")
+    monkeypatch.delenv("UNSLOTH_DISABLE_STATISTICS", raising=False)
+    configure_unsloth_env()
+    assert "UNSLOTH_DISABLE_STATISTICS" not in os.environ
+
+
+def test_block_unsloth_statistics_replaces_every_entry():
+    import types
+
+    fake = types.ModuleType("unsloth.models.llama")
+    fake.get_statistics = lambda *a, **k: "called"
+    other = types.ModuleType("some.other.module")
+    other.get_statistics = lambda *a, **k: "called"
+
+    patched = block_unsloth_statistics([fake, other, None])
+    assert patched == 1, "只该改 unsloth.* 的模块"
+    assert fake.get_statistics() is None
+    assert other.get_statistics() == "called"
 
 
 def test_sanitize_proxy_env_drops_unsupported_scheme(monkeypatch):
