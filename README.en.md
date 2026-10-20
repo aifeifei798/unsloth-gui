@@ -105,6 +105,30 @@ Artifacts: `outputs/<experiment>/` (LoRA adapter + `run_manifest.json`),
 The chat page reads the prompt template, `seq_len` and base-model info from
 `run_manifest.json`, matching the training format automatically.
 
+### ⏱ Training feels slow to start? Unsloth's switches
+
+Between "Start training" and the first step there is a minute or two of fixed
+Unsloth overhead. Measured on an RTX 5090 D with Qwen3.5-0.8B:
+
+| Stage | Default | Turned off |
+| --- | --- | --- |
+| `import unsloth` (Zoo patching) | ~10s | same |
+| **`get_statistics()` health probe** (subprocess downloads a README from HF to check it is up) | **~76s (worse on a slow proxy)** | **off by default** (`UNSLOTH_DISABLE_STATISTICS=1`) |
+| `torch.compile` of the 24 decoder blocks | ~30s | `UNSLOTH_BLOCK_COMPILE=0`, but each step gets slower |
+| Weight load + first forward | ~35s | same |
+
+This project sets `UNSLOTH_DISABLE_STATISTICS=1` by default (the probe only
+checks whether HF is reachable, it has nothing to do with training). For an
+even quicker start, add `UNSLOTH_BLOCK_COMPILE=0`:
+
+```bash
+UNSLOTH_BLOCK_COMPILE=0 ./server.sh start
+```
+
+Two log lines mean you are on a slower path — installing them helps:
+- `causal_conv1d is falling back to its reference PyTorch implementation` → Qwen3.5's linear-attention layers run the slow path; `pip install causal-conv1d` speeds them up
+- `FA2 = False` → flash-attn 2 is missing, only xformers is used; `pip install flash-attn` is faster still (slow to build)
+
 ---
 
 ## 📁 Layout

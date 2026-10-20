@@ -227,6 +227,7 @@
   "tr.no_chat_template": "Warning: this model has no chat template; falling back to the Instruction/Response template.",
   "tr.chat_fallback": "Warning: dataset(s) {names} lack instruction/output mapping; falling back to the Instruction/Response template.",
   "tr.init_model": "Loading model: {id} ...",
+  "tr.model_loaded": "Model loaded in {sec}s (includes Unsloth compilation; slow the first time, cached afterwards).",
   "tr.resolve_fail": "❌ Failed to resolve model: {err}",
   "tr.resume_from": "Resuming from checkpoint... ({ckpt})",
   "tr.resume_fresh": "Resume checked but no checkpoint found, training from scratch...",

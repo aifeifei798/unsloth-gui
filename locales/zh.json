@@ -227,6 +227,7 @@
   "tr.no_chat_template": "警告：该模型没有自带对话模板，回退到 Instruction/Response 模板。",
   "tr.chat_fallback": "警告：数据集 {names} 缺少 instruction/output 映射，回退到 Instruction/Response 模板。",
   "tr.init_model": "初始化模型: {id} ...",
+  "tr.model_loaded": "模型加载完成（用时 {sec} 秒，含 Unsloth 编译；第一次会慢，之后有缓存）。",
   "tr.resolve_fail": "❌ 模型地址解析失败: {err}",
   "tr.resume_from": "从断点继续训练... ({ckpt})",
   "tr.resume_fresh": "勾了续训但没找到断点 checkpoint，从头开始训练...",

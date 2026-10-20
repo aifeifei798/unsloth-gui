@@ -90,6 +90,28 @@ pip install -r requirements.txt -r requirements-web.txt
 推理页会读取 `run_manifest.json` 里的 prompt 模板、`seq_len` 和基础模型信息，
 自动对齐训练时的格式。
 
+### ⏱ 训练启动慢？Unsloth 的几个开关
+
+点「开始训练」后到真正跑起来要一两分钟，这是 Unsloth 的固定开销，实测拆解（RTX 5090 D + Qwen3.5-0.8B）：
+
+| 阶段 | 默认 | 关掉后 |
+| --- | --- | --- |
+| `import unsloth`（Zoo 打补丁） | ~10s | 一样 |
+| **`get_statistics()` 联网体检**（子进程去 HF 下 README 看服务是否挂） | **~76s（慢代理下更久）** | **默认已关**（`UNSLOTH_DISABLE_STATISTICS=1`） |
+| 24 层 decoder 的 `torch.compile` | ~30s | `UNSLOTH_BLOCK_COMPILE=0` 可关，但每步会慢一点 |
+| 权重加载 + 首次前向 | ~35s | 一样 |
+
+本项目默认设了 `UNSLOTH_DISABLE_STATISTICS=1`（那步只是查 HF 通不通，跟训练无关）；
+想更省启动时间可以再设 `UNSLOTH_BLOCK_COMPILE=0`：
+
+```bash
+UNSLOTH_BLOCK_COMPILE=0 ./server.sh start
+```
+
+另外日志里这两行是「降速」提示，装上更快：
+- `causal_conv1d is falling back to its reference PyTorch implementation` → Qwen3.5 的线性注意力层在走慢路径，`pip install causal-conv1d` 能提速
+- `FA2 = False` → 没装 flash-attn 2，只用了 xformers；`pip install flash-attn` 可再快一截（编译较慢）
+
 ---
 
 ## 📁 目录结构

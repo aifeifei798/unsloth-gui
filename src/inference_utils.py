@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
-from .model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
+from .model_utils import (
+    configure_hf_transfer,
+    configure_unsloth_env,
+    sanitize_proxy_env,
+    unwrap_text_tokenizer,
+)
 from .paths import OUTPUTS_PARENT_DIR
 
 _mgr_lock = threading.Lock()
@@ -471,6 +476,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 except Exception:
                     pass
             configure_hf_transfer(bool(model_cfg.fast_download))
+            configure_unsloth_env()  # 跳过 Unsloth 的联网体检（慢且没用）
             sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
             import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
             from unsloth import FastLanguageModel

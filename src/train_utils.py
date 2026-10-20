@@ -16,13 +16,19 @@ import gc
 import inspect
 import re
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
-from .model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
+from .model_utils import (
+    configure_hf_transfer,
+    configure_unsloth_env,
+    sanitize_proxy_env,
+    unwrap_text_tokenizer,
+)
 from .paths import LOGS_PARENT_DIR, OUTPUTS_PARENT_DIR
 from .storage import atomic_write_json
 
@@ -374,6 +380,7 @@ def run_training(req: TrainRequest, progress=None,
         except Exception:
             pass
         configure_hf_transfer(bool(model_cfg.fast_download))
+        configure_unsloth_env()  # 跳过 Unsloth 的联网体检（慢且没用）
         sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
         import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
         from unsloth import FastLanguageModel
@@ -388,12 +395,14 @@ def run_training(req: TrainRequest, progress=None,
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
         dtype = dtype_map.get(model_cfg.dtype) if model_cfg.dtype else None
         seq_len = int(req.max_seq_length or model_cfg.max_seq_length or 2048)
+        load_t0 = time.time()
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_path,
             max_seq_length=seq_len,
             dtype=dtype,
             load_in_4bit=bool(model_cfg.load_in_4bit),
         )
+        yield t("tr.model_loaded", sec=int(time.time() - load_t0))
         tokenizer = unwrap_text_tokenizer(tokenizer)
         # 模型配置指定了 Unsloth 模板名（chatml / qwen-2.5 / llama-3.1 …）就用它，
         # 否则用模型自带的 chat_template（与 Unsloth 官方用法一致）

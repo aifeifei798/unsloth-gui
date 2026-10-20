@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.i18n import dictionary, get_lang, language, normalize_lang, t
-from src.model_utils import sanitize_proxy_env
+from src.model_utils import configure_unsloth_env, sanitize_proxy_env
 from src.paths import ensure_runtime_dirs
 from src.tb_utils import stop_tensorboard
 
@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
     dropped = sanitize_proxy_env()
     if dropped:
         print("[proxy] 已忽略不兼容的代理变量: " + ", ".join(dropped))
+    # Unsloth 的联网体检（get_statistics）在慢代理下要 1~2 分钟，默认关掉
+    configure_unsloth_env()
     job_manager.bind_loop()
     yield
     stop_tensorboard()

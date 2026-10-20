@@ -20,7 +20,12 @@ from src.dataset_utils import (
 )
 from src.i18n import check_parity
 from src.inference_utils import _build_chat_prompt, _headers_from_template, _render_prompt
-from src.model_utils import configure_hf_transfer, sanitize_proxy_env, unwrap_text_tokenizer
+from src.model_utils import (
+    configure_hf_transfer,
+    configure_unsloth_env,
+    sanitize_proxy_env,
+    unwrap_text_tokenizer,
+)
 
 
 def test_schema_version_is_three():
@@ -190,6 +195,16 @@ def test_tb_command_resolves_tensorboard():
     assert cmd[0].endswith("tensorboard") or cmd[0] == sys.executable
     if cmd[0] == sys.executable:
         assert cmd[1:3] == ["-m", "tensorboard.main"]
+
+
+def test_configure_unsloth_env_disables_statistics(monkeypatch):
+    monkeypatch.delenv("UNSLOTH_DISABLE_STATISTICS", raising=False)
+    configure_unsloth_env()
+    assert os.environ["UNSLOTH_DISABLE_STATISTICS"] == "1"
+    # 用户自己设过就别覆盖
+    monkeypatch.setenv("UNSLOTH_DISABLE_STATISTICS", "0")
+    configure_unsloth_env()
+    assert os.environ["UNSLOTH_DISABLE_STATISTICS"] == "0"
 
 
 def test_sanitize_proxy_env_drops_unsupported_scheme(monkeypatch):

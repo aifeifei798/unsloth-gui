@@ -45,6 +45,17 @@ def configure_hf_transfer(enabled: bool) -> None:
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1" if enabled else "0"
 
 
+def configure_unsloth_env() -> None:
+    """Unsloth 启动环境开关（默认关掉它的联网体检）。
+
+    Unsloth 每次 from_pretrained 都会跑 get_statistics()：起子进程去 HuggingFace
+    下载一个 README，看「HF 是不是挂了」（见 unsloth/models/_utils.py）。
+    代理慢的时候这一步要 1~2 分钟（实测 76 秒），和训练本身毫无关系。
+    UNSLOTH_DISABLE_STATISTICS=1 直接跳过；用户自己设过就不动。
+    """
+    os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
+
+
 def unwrap_text_tokenizer(tokenizer):
     """多模态模型返回 Processor 时，取它内部的纯文本 Tokenizer。
 
