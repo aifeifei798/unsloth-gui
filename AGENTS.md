@@ -5,8 +5,9 @@
 ## 项目是什么
 
 基于 FastAPI + Jinja2 + 原生 JS + DaisyUI 的轻量**纯文本单卡 SFT** 图形工作台
-（文本训练 only，图片/视频/音频不做）。五个页面：模型管理 / 数据管理 / 数据处理 /
-训练 / 测试。界面中英双语，文案全在 `locales/*.json`；Web 用 Cookie + `ContextVar`
+（文本训练 only，图片/视频/音频不做）。顶部导航四个入口：数据处理 / 进行训练 /
+对话测试 / 设置；模型管理、数据管理、界面语言都收在「设置」页里（三个子 tab）。
+界面中英双语，文案全在 `locales/*.json`；Web 用 Cookie + `ContextVar`
 请求级切换语言，不重启进程。
 
 ## 目录
@@ -20,9 +21,9 @@ web/
   jobs.py              # JobManager + SSE（事件补发、Last-Event-ID、取消）
   schemas.py           # 请求体模型
   routers/             # system / models / datasets / prepare / train / inference
-  templates/           # base.html + 五个页面
+  templates/           # base.html + 四个页面（prepare / train / chat / settings）
   static/css/app.css   # 手写布局工具类（DaisyUI 只带组件，不带 Tailwind utilities）
-  static/js/           # common + 五个页面脚本
+  static/js/           # common（含通用 initTabs）+ 每个页面脚本
   static/vendor/       # DaisyUI CSS、marked、DOMPurify（本地 vendor）
 tests/                 # pytest：domain / API / jobs / SSE / WebSocket
 locales/zh.json        # 中文文案（基准，精确措辞以它为准）
@@ -75,6 +76,10 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
 12. **SSE/WS 约定**：事件名固定为 `state / progress / log / metrics / done / error /
     cancelled / end`；任务结束前必须发 `done` 或 `error`/`cancelled`，最后发 `end`。
     晚订阅/重连要能从 `job.events` 补发，`Last-Event-ID` 语义不要破坏。
+13. **导航结构**：顶部只有 4 个入口（数据处理 / 进行训练 / 对话测试 / 设置）；
+    模型管理、数据管理、界面语言都在「设置」页的子 tab 里。子 tab 切换统一用
+    `common.js` 的 `initTabs`（按钮 `data-tab`、面板 `data-panel`），别再各写一套。
+    老链接 `/models`、`/datasets` 保持 302 跳 `/settings`。
 
 ## 改完必须跑（本机无 GPU，所有验证都不需要 torch）
 

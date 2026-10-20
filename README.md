@@ -7,8 +7,8 @@
 > [English](README.en.md)
 
 一个基于 FastAPI + Jinja2 + [Unsloth](https://github.com/unslothai/unsloth) 的图形化微调工作台，
-专注**纯文本单卡 SFT**：模型管理、数据处理、训练、监控、对话，一个页面完成，
-全程不用写代码，不用手改配置文件。
+专注**纯文本单卡 SFT**：数据处理、训练、监控、对话全在浏览器里点完，模型和界面语言
+统一放设置页，全程不用写代码，不用手改配置文件。
 
 > Web 界面默认 `http://127.0.0.1:7861`，语言切换即时生效、无需重启。
 > 本工具面向本机单用户，**没有鉴权**，不要把端口直接暴露到公网。
@@ -17,15 +17,14 @@
 
 ---
 
-## ✨ 五个页面
+## ✨ 四个入口
 
-| 页面 | 干什么 |
+| 入口 | 干什么 |
 | --- | ------ |
-| 🤖 模型管理 | 点行即改：本地路径 / HuggingFace / 魔搭 ModelScope 三种来源增删改，同名覆盖更新，删除前弹窗确认 |
-| 🗂 数据管理 | 统一数据的列表、行数、大小、映射详情，看样本、重命名（产物跟着搬家）、删除（只删生成物，源文件不动） |
-| 🧹 数据处理 | 上传文件 / HF ID / 已有配置 → 只取 1 行秒看列 → 四角色多选映射（instruction / input / think / output）→ 单行预览 → 生成统一训练数据 |
-| 🚀 训练 | 按步数/轮次、可取消、多数据集合并、断点续训、TensorBoard 实时看板 |
-| 💬 测试 | 载入 LoRA 流式对话，温度/top-p 等可调，一键卸载腾显存 |
+| 1 🧹 数据处理 | 选来源（上传 / HF ID / 已有配置）→ 读列 → 映射生成：四角色多选（instruction / input / think / output）→ 单行预览 → 生成统一训练数据 |
+| 2 🚀 进行训练 | 按步数/轮次、可取消、多数据集合并、断点续训、TensorBoard 实时看板；训练文本默认走模型自带 chat 模板 |
+| 3 💬 对话测试 | 载入 LoRA 流式对话，温度/top-p 等可调，一键卸载腾显存 |
+| ⚙️ 设置 | 模型管理（本地/HF/魔搭增删改）+ 数据管理（统一数据列表、重命名、删除）+ 界面语言 |
 
 统一数据格式：`instruction / input / think / output` 四列，多列换行拼接；
 训练时 **user=指令(+上下文) / assistant=回复(含 think)**，最终训练文本由**模型自带的
@@ -80,9 +79,9 @@ pip install -r requirements.txt -r requirements-web.txt
 前台运行用 `./server.sh run`。默认监听 `127.0.0.1:7861`，可用
 `--host` / `--port` 覆盖；PID 和服务日志在 `.run/`（已 git 忽略）。
 
-浏览器打开 `http://127.0.0.1:7861`，流程：模型管理加模型 →
-数据处理做数据 → 训练（TensorBoard 实时监控，支持中途停止/断点续训）→
-测试页载入 LoRA 对话。右上角可即时切换中文/English，无需重启。
+浏览器打开 `http://127.0.0.1:7861`，流程：设置页加模型 →
+数据处理做数据 → 进行训练（TensorBoard 实时监控，支持中途停止/断点续训）→
+对话测试载入 LoRA 对话。界面语言在设置页里切换，即时生效，无需重启。
 
 训练需要 CUDA + `requirements.txt` 里的训练栈；Web 启动本身不导入 torch。
 
@@ -103,7 +102,7 @@ web/                    # FastAPI + Jinja2 Web 层
   main.py               # 应用入口、语言中间件、页面路由
   jobs.py               # 后台任务 + SSE（训练/数据处理）
   routers/              # system / models / datasets / prepare / train / inference
-  templates/            # base + 五个页面
+  templates/            # base + 四个页面（prepare / train / chat / settings）
   static/               # app.css、页面 JS、DaisyUI vendor
 tests/                  # pytest：domain / API / job / SSE / WebSocket
 src/

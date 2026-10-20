@@ -112,17 +112,23 @@ def _render(request: Request, page: str, active: str):
 
 @app.get("/")
 async def root():
-    return RedirectResponse("/models")
+    return RedirectResponse("/prepare")
 
 
+@app.get("/settings")
+async def settings_page(request: Request):
+    return _render(request, "settings", "settings")
+
+
+# 模型 / 数据都搬进设置页了，老链接自动跳过去
 @app.get("/models")
 async def models_page(request: Request):
-    return _render(request, "models", "models")
+    return RedirectResponse("/settings")
 
 
 @app.get("/datasets")
 async def datasets_page(request: Request):
-    return _render(request, "datasets", "datasets")
+    return RedirectResponse("/settings")
 
 
 @app.get("/prepare")

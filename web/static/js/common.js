@@ -1,6 +1,14 @@
 (function () {
   const I18N = window.I18N || {};
 
+  function qs(sel, root) {
+    return (root || document).querySelector(sel);
+  }
+
+  function qsa(sel, root) {
+    return Array.from((root || document).querySelectorAll(sel));
+  }
+
   function t(key, params) {
     let s = I18N[key] != null ? I18N[key] : key;
     if (params) {
@@ -142,6 +150,22 @@
       '" class="text-center muted py-4">' + escapeHtml(text) + '</td></tr>';
   }
 
+  // 通用 tab 切换：按钮 data-tab="名字"，面板 data-panel="名字"
+  function initTabs(barSel) {
+    const bar = qs(barSel);
+    if (!bar) return function () {};
+    const buttons = qsa('[data-tab]', bar);
+    const panels = qsa('[data-panel]');
+    function select(name) {
+      buttons.forEach((b) => b.classList.toggle('tab-active', b.dataset.tab === name));
+      panels.forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== name));
+    }
+    buttons.forEach((b) => b.addEventListener('click', () => select(b.dataset.tab)));
+    const active = buttons.find((b) => b.classList.contains('tab-active')) || buttons[0];
+    if (active) select(active.dataset.tab);
+    return select;
+  }
+
   function attachCommon() {
     const themeBtn = document.getElementById('theme-toggle');
     function applyTheme(theme) {
@@ -178,8 +202,7 @@
 
   window.UG = {
     t, api, toast, showStatus, hide, confirm: confirmDialog,
-    setButtonBusy, watchJob, escapeHtml, formatBytes, emptyRow,
-    qs: (sel, root) => (root || document).querySelector(sel),
-    qsa: (sel, root) => Array.from((root || document).querySelectorAll(sel)),
+    setButtonBusy, watchJob, escapeHtml, formatBytes, emptyRow, initTabs,
+    qs, qsa,
   };
 })();

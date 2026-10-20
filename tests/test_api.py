@@ -26,17 +26,22 @@ def test_health_and_pages(client):
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
-    for path in ("/models", "/datasets", "/prepare", "/train", "/chat"):
+    for path in ("/settings", "/prepare", "/train", "/chat"):
         r = client.get(path)
         assert r.status_code == 200
         assert "Unsloth GUI" in r.text
         assert "window.I18N" in r.text
+    # 模型 / 数据已并进设置页，老链接自动跳转
+    for path in ("/models", "/datasets"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code in (302, 307)
+        assert r.headers["location"].endswith("/settings")
 
 
-def test_root_redirects_to_models(client):
+def test_root_redirects_to_prepare(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (302, 307)
-    assert r.headers["location"].endswith("/models")
+    assert r.headers["location"].endswith("/prepare")
 
 
 def test_language_cookie_only_one(client):
@@ -45,16 +50,16 @@ def test_language_cookie_only_one(client):
     assert r.json()["data"]["message"] == "Language changed"
     cookies = r.headers.get_list("set-cookie")
     assert len(cookies) == 1 and "ugui_lang=en" in cookies[0]
-    r = client.get("/models")
-    assert "Models" in r.text
+    r = client.get("/settings")
+    assert "Settings" in r.text
 
 
 def test_i18n_payload(client):
     r = client.get("/api/i18n/zh")
     assert r.status_code == 200
-    assert r.json()["data"]["messages"]["web.nav.models"] == "模型"
+    assert r.json()["data"]["messages"]["web.nav.settings"] == "设置"
     r = client.get("/api/i18n/en")
-    assert r.json()["data"]["messages"]["web.nav.models"] == "Models"
+    assert r.json()["data"]["messages"]["web.nav.settings"] == "Settings"
 
 
 def test_models_crud(client):

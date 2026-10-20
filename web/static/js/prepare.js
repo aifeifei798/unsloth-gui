@@ -1,6 +1,6 @@
 (function () {
   const { api, t, toast, showStatus, hide, setButtonBusy, watchJob,
-          formatBytes, escapeHtml, qs, qsa } = window.UG;
+          formatBytes, escapeHtml, qs, initTabs } = window.UG;
 
   let uploadId = null;
   let token = null;
@@ -8,13 +8,7 @@
   let jobId = null;
   let watcher = null;
 
-  function selectTab(name) {
-    qsa('#prep-tabs [data-tab]').forEach((btn) => {
-      btn.classList.toggle('tab-active', btn.dataset.tab === name);
-    });
-    qs('#prep-panel-source').classList.toggle('hidden', name !== 'source');
-    qs('#prep-panel-mapping').classList.toggle('hidden', name !== 'mapping');
-  }
+  const selectTab = initTabs('#prep-tabs');
 
   function renderMulti(el, cols, selected) {
     if (!el) return;
@@ -237,10 +231,6 @@
   qs('#prep-preview').addEventListener('click', preview);
   qs('#prep-generate').addEventListener('click', generate);
   qs('#prep-cancel').addEventListener('click', cancel);
-  qsa('#prep-tabs [data-tab]').forEach((btn) => {
-    btn.addEventListener('click', () => selectTab(btn.dataset.tab));
-  });
   sourceChanged();
-  selectTab('source');
   loadExisting();
 })();

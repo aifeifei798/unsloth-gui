@@ -7,8 +7,9 @@
 > [中文版](README.md)
 
 A FastAPI + Jinja2 + [Unsloth](https://github.com/unslothai/unsloth) GUI for fine-tuning,
-focused on **single-GPU text SFT**: model management, data prep, training,
-monitoring and chat on one page — no code, no hand-edited configs.
+focused on **single-GPU text SFT**: data prep, training, monitoring and chat are a
+few clicks in the browser, with models and the UI language under Settings —
+no code, no hand-edited configs.
 
 > The web UI runs at `http://127.0.0.1:7861`; language switching is instant and
 > needs no restart.
@@ -20,15 +21,14 @@ monitoring and chat on one page — no code, no hand-edited configs.
 
 ---
 
-## ✨ Five tabs
+## ✨ Four entries
 
-| Tab | What it does |
+| Entry | What it does |
 | --- | ------------ |
-| 🤖 Models | Click a row to edit. Local paths, HuggingFace and ModelScope IDs. Same name overwrites; delete asks for confirmation |
-| 🗂 Data | Unified-data list, row counts, sizes, mapping details. Sample, rename (artifacts move along), delete (only generated artifacts; sources untouched) |
-| 🧹 Data Prep | Upload / HF ID / existing config → 1-row instant column peek → multi-select mapping (instruction / input / think / output) → single-row preview → generate unified training data |
-| 🚀 Train | Steps/epochs modes, cancellable, multi-dataset merge, resume from checkpoint, live TensorBoard |
-| 💬 Test | Load a LoRA for streaming chat, tunable temperature/top-p, one-click unload to free VRAM |
+| 1 🧹 Data Prep | Pick a source (upload / HF ID / existing config) → read columns → map & generate: multi-select roles (instruction / input / think / output) → single-row preview → generate unified training data |
+| 2 🚀 Train | Steps/epochs modes, cancellable, multi-dataset merge, resume from checkpoint, live TensorBoard; training text uses the model's own chat template by default |
+| 3 💬 Chat Test | Load a LoRA for streaming chat, tunable temperature/top-p, one-click unload to free VRAM |
+| ⚙️ Settings | Models (local/HF/ModelScope CRUD) + Datasets (list, rename, delete) + interface language |
 
 Unified format: 4 columns, `instruction / input / think / output`, each multi-selectable
 and joined top-down with newlines; no Input section when input is unmapped.
@@ -92,9 +92,9 @@ Use `./server.sh run` for foreground mode. The default is `127.0.0.1:7861`;
 override with `--host` / `--port`. PID and server logs live in `.run/`
 (git-ignored).
 
-Open `http://127.0.0.1:7861`. Flow: add a model in Models →
+Open `http://127.0.0.1:7861`. Flow: add a model in Settings →
 make data in Data Prep → Train (watch TensorBoard live, stop/resume anytime) →
-load the LoRA in Test and chat. Switch 中文/English in the top bar instantly,
+load the LoRA in Chat Test and chat. Switch 中文/English in Settings instantly,
 with no restart.
 
 Training needs CUDA and the training stack from `requirements.txt`; starting the
@@ -117,7 +117,7 @@ web/                    # FastAPI + Jinja2 web layer
   main.py               # app entry, language middleware, page routes
   jobs.py               # background jobs + SSE (training/data prep)
   routers/              # system / models / datasets / prepare / train / inference
-  templates/            # base + five pages
+  templates/            # base + four pages (prepare / train / chat / settings)
   static/               # app.css, page JS, DaisyUI vendor
 tests/                  # pytest: domain / API / jobs / SSE / WebSocket
 src/
