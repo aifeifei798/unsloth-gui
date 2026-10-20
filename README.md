@@ -34,6 +34,9 @@ Response = think + output（think 缺 `<think>` 标签自动套上）；
 产物目录存在）才会出现在训练下拉里**；示例 `datasets_config/sunwukong.json`
 默认是未处理状态，先走一遍数据处理即可训练。
 
+模型管理里每个模型带一个「Unsloth 快速下载（hf_transfer）」开关，**默认关闭**；
+环境不支持 hf_transfer 时保持关闭，避免下载卡在进度条上。
+
 ---
 
 ## 🔧 安装

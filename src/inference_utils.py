@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
+from .model_utils import configure_hf_transfer, unwrap_text_tokenizer
 from .paths import OUTPUTS_PARENT_DIR
 
 _mgr_lock = threading.Lock()
@@ -379,6 +380,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                     progress(0.2, desc=t("inf.loading_base", id=model_cfg.model_id))
                 except Exception:
                     pass
+            configure_hf_transfer(bool(model_cfg.fast_download))
             from unsloth import FastLanguageModel
 
             try:
@@ -390,6 +392,7 @@ def load_inference_model(base_model_name: str, lora_name: str, progress=None) ->
                 max_seq_length=seq_len,
                 load_in_4bit=bool(model_cfg.load_in_4bit),
             )
+            tokenizer = unwrap_text_tokenizer(tokenizer)
             if getattr(model_cfg, "chat_template", None):
                 try:
                     from unsloth.chat_templates import get_chat_template

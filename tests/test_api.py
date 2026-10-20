@@ -63,12 +63,14 @@ def test_models_crud(client):
         "model_id": "unsloth/phi-3-mini-4k-instruct",
         "source": "huggingface",
         "load_in_4bit": True,
+        "fast_download": True,
         "dtype": None,
         "max_seq_length": 2048,
         "chat_template": None,
     }
     r = client.post("/api/models", json=body)
     assert r.status_code == 200, r.text
+    assert r.json()["data"]["fast_download"] is True
     r = client.post("/api/models", json=body)
     assert r.status_code == 409
 

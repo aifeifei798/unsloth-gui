@@ -40,6 +40,10 @@ rows with empty replies are dropped and counted.
 present) appears in the training dropdown.** The bundled `datasets_config/sunwukong.json`
 is unprocessed by default; run it through Data Prep first.
 
+Every model in Models has an "Unsloth fast download (hf_transfer)" toggle, **off by
+default**; keep it off when your environment doesn't support hf_transfer, otherwise
+downloads can stall on the progress bar.
+
 ---
 
 ## 🔧 Install

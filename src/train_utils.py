@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 from .i18n import t
+from .model_utils import configure_hf_transfer, unwrap_text_tokenizer
 from .paths import LOGS_PARENT_DIR, OUTPUTS_PARENT_DIR
 from .storage import atomic_write_json
 
@@ -358,6 +359,7 @@ def run_training(req: TrainRequest, progress=None,
             torch._dynamo.config.recompile_limit = 100
         except Exception:
             pass
+        configure_hf_transfer(bool(model_cfg.fast_download))
         from unsloth import FastLanguageModel
 
         _call_progress(progress, 0.3, t("tr.init_model", id=model_cfg.model_id))
@@ -376,6 +378,7 @@ def run_training(req: TrainRequest, progress=None,
             dtype=dtype,
             load_in_4bit=bool(model_cfg.load_in_4bit),
         )
+        tokenizer = unwrap_text_tokenizer(tokenizer)
         if _cancelled():
             yield t("tr.cancelled_before_start")
             return

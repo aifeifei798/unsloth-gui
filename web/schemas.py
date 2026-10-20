@@ -11,6 +11,7 @@ class ModelIn(BaseModel):
     model_id: str = ""
     source: str = "auto"
     load_in_4bit: bool = True
+    fast_download: bool = False
     dtype: Optional[str] = None
     max_seq_length: int = Field(default=2048, ge=0)
     chat_template: Optional[str] = None

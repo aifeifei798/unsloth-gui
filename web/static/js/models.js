@@ -12,6 +12,7 @@
     qs('#model-source').value = m ? (m.source || 'auto') : 'auto';
     qs('#model-id').value = m ? m.model_id : '';
     qs('#model-4bit').checked = m ? !!m.load_in_4bit : true;
+    qs('#model-fast').checked = m ? !!m.fast_download : false;
     qs('#model-dtype').value = m && m.dtype ? m.dtype : '';
     qs('#model-seq').value = m ? m.max_seq_length : 2048;
     qs('#model-chat').value = m ? (m.chat_template || '') : '';
@@ -23,7 +24,7 @@
 
   function render() {
     if (!models.length) {
-      emptyRow(tbody, 6, t('web.empty'));
+      emptyRow(tbody, 7, t('web.empty'));
       return;
     }
     tbody.innerHTML = models.map((m) => {
@@ -35,6 +36,7 @@
         + '<td>' + escapeHtml(m.source_label || m.source) + missing + '</td>'
         + '<td class="small">' + escapeHtml(m.model_id) + '</td>'
         + '<td>' + (m.load_in_4bit ? '✅' : '—') + '</td>'
+        + '<td>' + (m.fast_download ? '✅' : '—') + '</td>'
         + '<td>' + escapeHtml(m.dtype || t('common.auto')) + '</td>'
         + '<td>' + escapeHtml(m.max_seq_length) + '</td>'
         + '</tr>';
@@ -57,7 +59,7 @@
       }
     } catch (e) {
       models = [];
-      emptyRow(tbody, 6, t('web.empty'));
+      emptyRow(tbody, 7, t('web.empty'));
       toast(e.message, 'error');
     }
   }
@@ -69,6 +71,7 @@
       model_id: qs('#model-id').value.trim(),
       source: qs('#model-source').value,
       load_in_4bit: qs('#model-4bit').checked,
+      fast_download: qs('#model-fast').checked,
       dtype: qs('#model-dtype').value || null,
       max_seq_length: Number(qs('#model-seq').value || 0),
       chat_template: qs('#model-chat').value.trim() || null,

@@ -32,6 +32,7 @@ class ModelConfig:
     display_name: str
     model_id: str
     load_in_4bit: bool = True
+    fast_download: bool = False  # Unsloth/hf_transfer 快速下载，默认关闭
     dtype: Optional[str] = None  # "bfloat16" | "float16" | None(auto)
     max_seq_length: int = 2048
     chat_template: Optional[str] = None  # 如 "llama-3.1" / "qwen-2.5" / "gemma-3"，None 则不强制
@@ -105,8 +106,8 @@ def _int_field(value: Any, default: int, *, name: str, field_name: str) -> int:
 def _model_from_dict(d: dict) -> ModelConfig:
     if "display_name" not in d or "model_id" not in d:
         raise ValueError(t("cfg.model_missing", d=d))
-    known = {"display_name", "model_id", "load_in_4bit", "dtype", "max_seq_length",
-             "chat_template", "source"}
+    known = {"display_name", "model_id", "load_in_4bit", "fast_download", "dtype",
+             "max_seq_length", "chat_template", "source"}
     source = str(d.get("source", "auto") or "auto").lower()
     if source not in ("auto", "local", "huggingface", "modelscope"):
         raise ValueError(t("cfg.model_bad_source", name=d.get("display_name"),
@@ -115,6 +116,7 @@ def _model_from_dict(d: dict) -> ModelConfig:
         display_name=str(d["display_name"]).strip(),
         model_id=str(d["model_id"]).strip(),
         load_in_4bit=bool(d.get("load_in_4bit", True)),
+        fast_download=bool(d.get("fast_download", False)),
         dtype=d.get("dtype"),
         max_seq_length=_int_field(d.get("max_seq_length"), 2048,
                                   name=d.get("display_name"), field_name="max_seq_length"),
@@ -315,6 +317,7 @@ def model_to_dict(cfg: ModelConfig) -> dict:
         "display_name": cfg.display_name,
         "model_id": cfg.model_id,
         "load_in_4bit": bool(cfg.load_in_4bit),
+        "fast_download": bool(cfg.fast_download),
         "dtype": cfg.dtype,
     }
     if cfg.max_seq_length != 2048:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from src.config import (
     SCHEMA_VERSION,
@@ -13,6 +14,7 @@ from src.dataprep import format_unified_row, resolve_mapping
 from src.dataset_utils import drop_empty_sections
 from src.i18n import check_parity
 from src.inference_utils import _headers_from_template, _render_prompt
+from src.model_utils import configure_hf_transfer, unwrap_text_tokenizer
 
 
 def test_schema_version_is_three():
@@ -101,6 +103,27 @@ def test_inference_prompt_without_input_section():
     assert "sys" in prompt
     assert "### Input:" not in prompt
     assert prompt.rstrip().endswith("### Response:")
+
+
+def test_configure_hf_transfer(monkeypatch):
+    monkeypatch.setenv("HF_HUB_ENABLE_HF_TRANSFER", "auto")
+    configure_hf_transfer(False)
+    assert os.environ["HF_HUB_ENABLE_HF_TRANSFER"] == "0"
+    configure_hf_transfer(True)
+    assert os.environ["HF_HUB_ENABLE_HF_TRANSFER"] == "1"
+
+
+def test_unwrap_text_tokenizer_from_processor():
+    class Tok:
+        def encode(self, text):
+            return [1]
+
+    class Processor:
+        tokenizer = Tok()
+
+    tok = Tok()
+    assert unwrap_text_tokenizer(tok) is tok
+    assert unwrap_text_tokenizer(Processor()) is Processor.tokenizer
 
 
 def test_locale_parity():

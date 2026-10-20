@@ -31,6 +31,7 @@ src/
   paths.py             # 统一路径解析（UNSLOTH_GUI_ROOT 可把根目录指到临时目录）
   storage.py           # 配置文件原子写
   i18n.py              # t(key, **params)，缺键回退中文；check_parity() 查 key 对齐
+  model_utils.py       # 多模态 Processor 解包为纯文本 Tokenizer；hf_transfer 开关
   config.py            # 模型/数据集配置加载、校验、来源解析（local/hf/modelscope）
   dataset_utils.py     # 训练格式化、空段清理、多数据集合并
   dataprep.py          # 数据处理：预览、映射、统一数据生成（schema v3）
