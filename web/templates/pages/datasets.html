@@ -5,7 +5,7 @@
     <h1>{{ t('web.page.datasets') }}</h1>
     <p class="muted">{{ t('d.subtitle') }}</p>
   </div>
-  <button id="datasets-refresh" class="btn btn-sm" type="button">🔄 {{ t('d.refresh') }}</button>
+  <button id="datasets-refresh" class="btn btn-sm" type="button">{{ t('d.refresh') }}</button>
 </div>
 
 <div id="datasets-warnings"></div>
@@ -42,13 +42,13 @@
         <div class="row">
           <input id="dataset-new-name" class="input input-bordered flex-1"
                  placeholder="{{ t('d.newname_ph') }}">
-          <button id="dataset-rename" class="btn btn-sm" type="button">✏️ {{ t('d.rename') }}</button>
+          <button id="dataset-rename" class="btn btn-sm" type="button">{{ t('d.rename') }}</button>
         </div>
       </div>
 
       <div class="row">
-        <button id="dataset-sample" class="btn btn-sm" type="button">👁 {{ t('d.sample_btn') }}</button>
-        <button id="dataset-delete" class="btn btn-error btn-outline btn-sm" type="button">🗑 {{ t('d.del') }}</button>
+        <button id="dataset-sample" class="btn btn-sm" type="button">{{ t('d.sample_btn') }}</button>
+        <button id="dataset-delete" class="btn btn-error btn-outline btn-sm" type="button">{{ t('d.del') }}</button>
       </div>
       <p class="muted">{{ t('d.sample') }}</p>
       <pre id="dataset-sample-out" class="pre hidden"></pre>
