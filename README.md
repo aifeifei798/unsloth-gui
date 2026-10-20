@@ -104,6 +104,10 @@ pip install -r requirements.txt -r requirements-web.txt
 本项目默认设了 `UNSLOTH_DISABLE_STATISTICS=1`（那步只是查 HF 通不通，跟训练无关），
 并且在 `import unsloth` 之后把 Unsloth 内部所有 `get_statistics` 入口换成空实现
 （它是 `from ._utils import *` 绑定的，只设环境变量不够硬），彻底堵死；
+连 8.8.8.8:53 的 `has_internet()` 探活也一并换掉——它在国内/企业防火墙/部分云
+环境常年不通（白等 3 秒 × 4），还会 `socket.setdefaulttimeout(3)` 把**整个进程**的
+socket 默认超时改成 3 秒，慢一点的下载会被误杀超时（我们会在 import 前记住原值并还原）。
+
 真要临时放行体检：`UNSLOTH_GUI_ALLOW_STATISTICS=1 ./server.sh start`。
 
 想再省启动时间可以设 `UNSLOTH_BLOCK_COMPILE=0`（跳过 24 层 decoder 的 torch.compile，

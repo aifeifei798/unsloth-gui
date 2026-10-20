@@ -88,8 +88,10 @@ local_data/            # 示例/上传/产物（processed/、uploads/ 已 gitign
     联网体检（慢代理下 ~76s）和 24 层 decoder 的 `torch.compile`（~30s，
     `UNSLOTH_BLOCK_COMPILE=0` 可关但每步更慢）。体检已被本项目**堵死**：
     `configure_unsloth_env()` 设 `UNSLOTH_DISABLE_STATISTICS=1`，
-    `block_unsloth_statistics()` 再把 Unsloth 里所有 `get_statistics` 入口换成空实现
-    （它是 `from ._utils import *` 绑定的，只设环境变量不够）。放行开关是
+    `block_unsloth_statistics()` 再把 Unsloth 里所有 `get_statistics` /
+    `has_internet` 入口换成空实现（前者是 `from ._utils import *` 绑定的，只设
+    环境变量不够；后者连 8.8.8.8:53 探活，还会 `socket.setdefaulttimeout(3)`
+    污染全进程默认超时，我们 import 前记住原值、之后还原）。放行开关是
     `UNSLOTH_GUI_ALLOW_STATISTICS=1`。改训练/推理加载路径时统一走这两个函数，
     别自己在别处设这些环境变量。
 

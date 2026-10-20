@@ -218,13 +218,30 @@ def test_block_unsloth_statistics_replaces_every_entry():
 
     fake = types.ModuleType("unsloth.models.llama")
     fake.get_statistics = lambda *a, **k: "called"
+    fake.has_internet = lambda *a, **k: False
     other = types.ModuleType("some.other.module")
     other.get_statistics = lambda *a, **k: "called"
 
     patched = block_unsloth_statistics([fake, other, None])
-    assert patched == 1, "只该改 unsloth.* 的模块"
+    assert patched == 2, "只该改 unsloth.* 的模块"
     assert fake.get_statistics() is None
+    assert fake.has_internet() is True, "探活要变成直接说有网"
     assert other.get_statistics() == "called"
+
+
+def test_block_unsloth_statistics_restores_socket_timeout():
+    import socket
+    import types
+
+    fake = types.ModuleType("unsloth.models._utils")
+    fake.get_statistics = lambda *a, **k: None
+    original = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(3)
+        block_unsloth_statistics([fake])
+        assert socket.getdefaulttimeout() == 3 or socket.getdefaulttimeout() == original
+    finally:
+        socket.setdefaulttimeout(original)
 
 
 def test_sanitize_proxy_env_drops_unsupported_scheme(monkeypatch):

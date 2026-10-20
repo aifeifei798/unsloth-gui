@@ -4,6 +4,10 @@ from __future__ import annotations
 import importlib.util
 import os
 
+# import unsloth 之前的 socket 默认超时（None = 阻塞模式）
+_SOCKET_TIMEOUT = None
+_SOCKET_TIMEOUT_CAPTURED = False
+
 
 def _socksio_available() -> bool:
     try:
@@ -57,6 +61,8 @@ def configure_unsloth_env() -> None:
     if os.environ.get("UNSLOTH_GUI_ALLOW_STATISTICS", "0") == "1":
         return
     os.environ["UNSLOTH_DISABLE_STATISTICS"] = "1"
+    # 顺手记下 socket 默认超时（Unsloth 的 has_internet 会把它全局改成 3s）
+    capture_socket_default_timeout()
 
 
 def _statistics_noop(*args, **kwargs) -> None:
@@ -64,15 +70,13 @@ def _statistics_noop(*args, **kwargs) -> None:
     return None
 
 
-def block_unsloth_statistics(modules=None) -> int:
-    """把 Unsloth 的联网体检彻底堵死，返回被替换的入口数。
+def _has_internet_noop(*args, **kwargs) -> bool:
+    """Unsloth 连 8.8.8.8:53 探活的空实现（直接当作有网）。"""
+    return True
 
-    光设 UNSLOTH_DISABLE_STATISTICS 不够：Unsloth 内部是
-    `from ._utils import *`（导入时就把名字绑好了），所以要把所有带
-    get_statistics 属性的 unsloth 模块都替换掉。必须在 import unsloth 之后调用。
 
-    这只影响遥测和「HF 是否挂了」的探测，不影响加载 / 训练 / 推理。
-    """
+def _patch_unsloth_modules(names: dict, modules=None) -> int:
+    """把 unsloth.* 各模块里的指定名字换成自己的实现，返回替换数。"""
     if modules is None:
         import sys
         modules = list(sys.modules.values())
@@ -83,13 +87,61 @@ def block_unsloth_statistics(modules=None) -> int:
         name = getattr(mod, "__name__", "") or ""
         if not name.startswith("unsloth"):
             continue
-        if getattr(mod, "get_statistics", None) is None:
-            continue
-        try:
-            setattr(mod, "get_statistics", _statistics_noop)
-            patched += 1
-        except Exception:
-            continue
+        for attr, func in names.items():
+            if getattr(mod, attr, None) is None:
+                continue
+            try:
+                setattr(mod, attr, func)
+                patched += 1
+            except Exception:
+                continue
+    return patched
+
+
+def capture_socket_default_timeout() -> None:
+    """记下当前进程的 socket 默认超时（import unsloth 之前）。"""
+    global _SOCKET_TIMEOUT, _SOCKET_TIMEOUT_CAPTURED
+    if _SOCKET_TIMEOUT_CAPTURED:
+        return
+    import socket
+    _SOCKET_TIMEOUT = socket.getdefaulttimeout()
+    _SOCKET_TIMEOUT_CAPTURED = True
+
+
+def restore_socket_default_timeout() -> None:
+    """把 socket 默认超时还原成 import unsloth 之前的值。
+
+    Unsloth 的 has_internet() 里有一句 `socket.setdefaulttimeout(3)`——这是
+    **全局**副作用，一改就是整个进程后续所有 socket 的默认超时都变成 3 秒，
+    慢一点的下载会被误杀超时。这里还原掉。
+    """
+    global _SOCKET_TIMEOUT, _SOCKET_TIMEOUT_CAPTURED
+    if not _SOCKET_TIMEOUT_CAPTURED:
+        return
+    import socket
+    try:
+        socket.setdefaulttimeout(_SOCKET_TIMEOUT)
+    except Exception:
+        pass
+
+
+def block_unsloth_statistics(modules=None) -> int:
+    """把 Unsloth 的联网体检彻底堵死，返回被替换的入口数。
+
+    光设 UNSLOTH_DISABLE_STATISTICS 不够：Unsloth 内部是
+    `from ._utils import *`（导入时就把名字绑好了），所以要把所有带
+    get_statistics 属性的 unsloth 模块都替换掉。必须在 import unsloth 之后调用。
+
+    顺带处理 has_internet()：它连 8.8.8.8:53 探活（国内/企业防火墙/部分云
+    环境常年不通，白等 3 秒 × 4 次），而且会把全局 socket 默认超时改成 3 秒。
+
+    这些都只影响遥测和「HF 是否挂了」的探测，不影响加载 / 训练 / 推理。
+    """
+    capture_socket_default_timeout()
+    patched = _patch_unsloth_modules(
+        {"get_statistics": _statistics_noop, "has_internet": _has_internet_noop},
+        modules=modules)
+    restore_socket_default_timeout()
     return patched
 
 

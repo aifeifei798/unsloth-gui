@@ -121,7 +121,14 @@ This project sets `UNSLOTH_DISABLE_STATISTICS=1` by default (the probe only
 checks whether HF is reachable, it has nothing to do with training) and, right
 after `import unsloth`, replaces every `get_statistics` entry point with a no-op
 (Unsloth binds them with `from ._utils import *`, so the env var alone is not
-enough). To let the probe through for one run:
+enough). The `has_internet()` probe is replaced too — it dials 8.8.8.8:53, which
+is usually blocked in mainland China, behind corporate firewalls or on some
+cloud networks (3 s × 4 wasted), and it calls `socket.setdefaulttimeout(3)`,
+which silently turns the *whole process*' default socket timeout into 3 s and
+kills slower downloads. We remember the original value before the import and
+restore it afterwards.
+
+To let the probe through for one run:
 `UNSLOTH_GUI_ALLOW_STATISTICS=1 ./server.sh start`.
 
 For an even quicker start, add `UNSLOTH_BLOCK_COMPILE=0` (skips the
