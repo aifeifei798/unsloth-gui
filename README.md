@@ -38,22 +38,23 @@ Response = think + output（think 缺 `<think>` 标签自动套上）；
 
 ## 🔧 安装
 
-先决条件：Python 3.10+，NVIDIA GPU + CUDA（8GB 显存起步）。
+先决条件：Python 3.10+；训练/推理需要 NVIDIA GPU + CUDA（8GB 显存起步）。
 
 ```bash
 git clone https://github.com/aifeifei798/unsloth-gui.git
 cd unsloth-gui
 
-python3 -m venv venv
-source venv/bin/activate
-# Windows: venv\Scripts\activate
+./install.sh              # 默认：Web 界面 + 训练/推理栈
+./install.sh --web-only   # 只装 Web 界面（无 GPU / 只看界面时用）
+./install.sh --dev        # 额外装 pytest / httpx / pyflakes
+```
 
-pip install -r requirements.txt
-# 或用 uv 自动匹配 torch 后端（推荐）：
-# uv pip install -r requirements.txt --torch-backend=auto
+脚本会创建 `.venv`，优先用 `uv`（自动匹配 torch 后端），没有 uv 就退回 pip。
+可用 `--venv DIR` / `--python BIN` 指定环境。手动安装仍可执行：
 
-# Web 界面依赖（FastAPI / Jinja2 / Uvicorn 等，不含训练栈）
-pip install -r requirements-web.txt
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-web.txt
 ```
 
 `requirements.txt` 是完整训练栈；`requirements-web.txt` 只装 Web 层。
@@ -64,11 +65,18 @@ pip install -r requirements-web.txt
 ## ▶️ 运行
 
 ```bash
-python -m web --port 7861
+./server.sh start
+./server.sh status
+./server.sh logs -f       # 跟踪日志，Ctrl-C 退出
+./server.sh restart
+./server.sh stop
 ```
 
+前台运行用 `./server.sh run`。默认监听 `127.0.0.1:7861`，可用
+`--host` / `--port` 覆盖；PID 和服务日志在 `.run/`（已 git 忽略）。
+
 浏览器打开 `http://127.0.0.1:7861`，流程：模型管理加模型 →
-数据处理制数据 → 训练（TensorBoard 实时监控，支持中途停止/断点续训）→
+数据处理做数据 → 训练（TensorBoard 实时监控，支持中途停止/断点续训）→
 测试页载入 LoRA 对话。右上角可即时切换中文/English，无需重启。
 
 训练需要 CUDA + `requirements.txt` 里的训练栈；Web 启动本身不导入 torch。
@@ -83,6 +91,9 @@ python -m web --port 7861
 ## 📁 目录结构
 
 ```
+install.sh              # 一键安装（Web + 训练栈可选）
+server.sh               # 后台启动 / 停止 / 重启 / 状态 / 日志
+.run/                   # server.sh 的 PID 与服务日志（运行时生成，git 忽略）
 web/                    # FastAPI + Jinja2 Web 层
   main.py               # 应用入口、语言中间件、页面路由
   jobs.py               # 后台任务 + SSE（训练/数据处理）

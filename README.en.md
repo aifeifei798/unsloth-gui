@@ -44,22 +44,24 @@ is unprocessed by default; run it through Data Prep first.
 
 ## 🔧 Install
 
-Requires Python 3.10+ and an NVIDIA GPU + CUDA (8GB VRAM minimum).
+Requires Python 3.10+; training/inference needs an NVIDIA GPU + CUDA (8GB VRAM minimum).
 
 ```bash
 git clone https://github.com/aifeifei798/unsloth-gui.git
 cd unsloth-gui
 
-python3 -m venv venv
-source venv/bin/activate
-# Windows: venv\Scripts\activate
+./install.sh              # default: web UI + training/inference stack
+./install.sh --web-only   # web UI only (no GPU / UI-only machine)
+./install.sh --dev        # also install pytest / httpx / pyflakes
+```
 
-pip install -r requirements.txt
-# or let uv match the torch backend (recommended):
-# uv pip install -r requirements.txt --torch-backend=auto
+The script creates `.venv`, prefers `uv` (with automatic torch backend matching),
+and falls back to pip. Use `--venv DIR` / `--python BIN` to override the
+environment. Manual installation still works:
 
-# Web UI dependencies (FastAPI / Jinja2 / Uvicorn; no training stack)
-pip install -r requirements-web.txt
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-web.txt
 ```
 
 `requirements.txt` is the full training stack; `requirements-web.txt` installs only
@@ -71,8 +73,16 @@ prepare data — training and inference will report missing dependencies.
 ## ▶️ Run
 
 ```bash
-python -m web --port 7861
+./server.sh start
+./server.sh status
+./server.sh logs -f       # follow logs; Ctrl-C to exit
+./server.sh restart
+./server.sh stop
 ```
+
+Use `./server.sh run` for foreground mode. The default is `127.0.0.1:7861`;
+override with `--host` / `--port`. PID and server logs live in `.run/`
+(git-ignored).
 
 Open `http://127.0.0.1:7861`. Flow: add a model in Models →
 make data in Data Prep → Train (watch TensorBoard live, stop/resume anytime) →
@@ -92,6 +102,9 @@ The chat page reads the prompt template, `seq_len` and base-model info from
 ## 📁 Layout
 
 ```
+install.sh              # one-shot install (web + optional training stack)
+server.sh               # start / stop / restart / status / logs
+.run/                   # server.sh PID and logs (runtime, git-ignored)
 web/                    # FastAPI + Jinja2 web layer
   main.py               # app entry, language middleware, page routes
   jobs.py               # background jobs + SSE (training/data prep)
