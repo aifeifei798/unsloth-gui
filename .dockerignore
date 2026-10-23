@@ -1,0 +1,16 @@
+# 构建上下文里排除本地产物/环境，避免把几 GB 的 .venv 和训练输出打进镜像
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.run/
+outputs/
+logs/
+local_data/
+unsloth_compiled_cache/
+*.safetensors
+*.bin
+*.arrow
+.DS_Store
