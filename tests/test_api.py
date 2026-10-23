@@ -242,6 +242,33 @@ def test_inference_websocket_ready_ping(client):
         assert ws.receive_json()["type"] == "cancelling"
 
 
+def test_inference_websocket_chat_passes_enable_thinking(client, monkeypatch):
+    """对话开关全链路：WS 消息里的 enable_thinking 要原样到 stream_chat."""
+    import web.routers.inference as inference_router
+
+    seen: dict = {}
+
+    def fake_stream(user_input, history, system_prompt, **kwargs):
+        seen.update(kwargs)
+        yield "hi"
+
+    monkeypatch.setattr(inference_router, "stream_chat", fake_stream)
+
+    def one_round(payload):
+        with client.websocket_connect("/api/inference/ws") as ws:
+            assert ws.receive_json()["type"] == "ready"
+            ws.send_json({"type": "chat", "message": "你好",
+                          "max_new_tokens": 64, "temperature": 0.7,
+                          "top_p": 0.9, "top_k": 40, **payload})
+            types = [ws.receive_json()["type"] for _ in range(3)]
+        assert types == ["start", "delta", "done"]
+
+    one_round({"enable_thinking": False})
+    assert seen["enable_thinking"] is False
+    one_round({})  # 缺省 = 开思考，老客户端行为不变
+    assert seen["enable_thinking"] is True
+
+
 def test_prepare_generate_job_and_sse(client):
     pytest = __import__("pytest")
     pytest.importorskip("datasets")

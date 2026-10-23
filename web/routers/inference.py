@@ -77,6 +77,7 @@ async def _run_chat(ws: WebSocket, message: str, history: list,
                 temperature=params["temperature"],
                 top_p=params["top_p"],
                 top_k=params["top_k"],
+                enable_thinking=params["enable_thinking"],
                 cancel_event=cancel,
             ):
                 loop.call_soon_threadsafe(q.put_nowait, ("delta", piece))
@@ -153,6 +154,8 @@ async def chat_ws(ws: WebSocket):
                     "temperature": max(0.0, min(float(data.get("temperature") or 0.7), 2.0)),
                     "top_p": max(0.01, min(float(data.get("top_p") or 0.95), 1.0)),
                     "top_k": max(0, min(int(data.get("top_k") or 40), 200)),
+                    # 显式发 false 才关；缺省（老客户端）保持开，和旧行为一致
+                    "enable_thinking": bool(data.get("enable_thinking", True)),
                 }
             except (TypeError, ValueError):
                 # 参数写坏了只回一条错误，别把整个 WebSocket 关掉

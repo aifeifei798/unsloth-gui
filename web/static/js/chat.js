@@ -193,6 +193,7 @@
       message,
       history,
       system_prompt: qs('#chat-system').value,
+      enable_thinking: qs('#chat-thinking').checked,
       max_new_tokens: Number(qs('#chat-max-tokens').value || 256),
       temperature: Number(qs('#chat-temp').value || 0.7),
       top_p: Number(qs('#chat-top-p').value || 0.95),
@@ -313,8 +314,22 @@
     }
   });
 
+  const THINKING_KEY = 'ugui-chat-thinking';
+
+  function initThinkingToggle() {
+    const box = qs('#chat-thinking');
+    try {
+      const saved = localStorage.getItem(THINKING_KEY);
+      if (saved !== null) box.checked = saved === '1';
+    } catch (e) {}
+    box.addEventListener('change', () => {
+      try { localStorage.setItem(THINKING_KEY, box.checked ? '1' : '0'); } catch (e) {}
+    });
+  }
+
   setConn(false);
   setStreaming(false);
+  initThinkingToggle();
   loadModels();
   loadLoras();
   loadStatus();

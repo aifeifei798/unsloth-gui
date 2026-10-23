@@ -135,6 +135,8 @@ class _FakeChatTokenizer:
         out = "".join(f"<|{m['role']}|>{m['content']}" for m in messages)
         if add_generation_prompt:
             out += "<|assistant|>"
+            if kwargs.get("enable_thinking") is False:
+                out += "<think></think>"
         return out
 
     def __call__(self, text, add_special_tokens=False, **kwargs):
@@ -183,6 +185,16 @@ def test_build_chat_prompt_ends_with_generation_prompt():
     assert out_tokens == 64
     prompt, _ = _build_chat_prompt(tok, [], "hello", "sys", 2048, 64)
     assert prompt.startswith("<|system|>sys")
+
+
+def test_build_chat_prompt_thinking_toggle():
+    """思考开关：默认开（旧行为），关时 enable_thinking=False 要传到模板层."""
+    tok = _FakeChatTokenizer()
+    prompt, _ = _build_chat_prompt(tok, [], "hello", "", 2048, 64)
+    assert prompt == "<|user|>hello<|assistant|>"
+    prompt, _ = _build_chat_prompt(tok, [], "hello", "", 2048, 64,
+                                   enable_thinking=False)
+    assert prompt.endswith("<|assistant|><think></think>")
 
 
 def test_configure_hf_transfer(monkeypatch):

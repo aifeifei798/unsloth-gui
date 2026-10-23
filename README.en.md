@@ -27,7 +27,7 @@ no code, no hand-edited configs.
 | --- | ------------ |
 | 1 🧹 Data Prep | Pick a source (upload / HF ID / existing config) → read columns → map & generate: multi-select roles (instruction / input / think / output) → single-row preview → generate unified training data |
 | 2 🚀 Train | Steps/epochs modes, cancellable, multi-dataset merge, resume from checkpoint, live TensorBoard; training text uses the model's own chat template by default |
-| 3 💬 Chat Test | Load a LoRA for streaming chat, tunable temperature/top-p, one-click unload to free VRAM |
+| 3 💬 Chat Test | Load a LoRA for streaming chat, tunable temperature/top-p, thinking-mode toggle (turn off for think-free data), one-click unload to free VRAM |
 | ⚙️ Settings | Models (local/HF/ModelScope CRUD) + Datasets (list, rename, delete) + interface language |
 
 Unified format: 4 columns, `instruction / input / think / output`, each multi-selectable

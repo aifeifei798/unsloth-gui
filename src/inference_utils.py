@@ -255,17 +255,20 @@ def _chat_messages(history: list, user_input: str, system_prompt: str) -> list[d
 
 
 def _render_chat_prompt(tokenizer, history: list, user_input: str,
-                        system_prompt: str) -> str:
+                        system_prompt: str, enable_thinking: bool = True) -> str:
     """用模型自带 chat 模板渲染「轮到模型说话」的提示词。
 
     enable_thinking=True 时提示词停在 `<think>` 开头，和训练文本里
-    assistant 段（<think>…</think>）的写法对齐。
+    assistant 段（<think>…</think>）的写法对齐；False 时模板直接把
+    `<think>\\n\\n</think>\\n\\n` 预填进 prompt，模型开口就是正文——
+    训练数据 think 全空（角色扮演类）时用这个，不然底座自带的思考
+    习惯会把 max_new_tokens 全烧在思考里。
     """
     from .dataset_utils import render_chat_text
 
     messages = _chat_messages(history, user_input, system_prompt)
     return render_chat_text(tokenizer, messages, add_generation_prompt=True,
-                            enable_thinking=True)
+                            enable_thinking=bool(enable_thinking))
 
 
 def _chat_stop_string(tokenizer) -> str:
@@ -284,12 +287,14 @@ def _chat_stop_string(tokenizer) -> str:
 
 def _build_chat_prompt(tokenizer, history: list, user_input: str,
                        system_prompt: str, max_seq_len: int,
-                       max_new_tokens: int) -> tuple[str, int]:
+                       max_new_tokens: int,
+                       enable_thinking: bool = True) -> tuple[str, int]:
     """chat 模板模式：按 token 预算丢历史，返回 (prompt, 实际 max_new_tokens)."""
     budget = max(64, int(max_seq_len) - int(max_new_tokens) - 8)
     turns = list(history or [])
     while True:
-        prompt = _render_chat_prompt(tokenizer, turns, user_input, system_prompt)
+        prompt = _render_chat_prompt(tokenizer, turns, user_input, system_prompt,
+                                     enable_thinking)
         n = _token_len(tokenizer, prompt)
         if n <= budget or not turns:
             break
@@ -314,6 +319,7 @@ class _CancelCriteria:
 def stream_chat(user_input: str, history: Optional[list], system_prompt: str,
                 max_new_tokens: int = 256, temperature: float = 0.7,
                 top_p: float = 0.95, top_k: int = 40,
+                enable_thinking: bool = True,
                 cancel_event: Optional[threading.Event] = None,
                 ) -> Generator[str, None, None]:
     """流式产出文本增量。模型未加载时抛 RuntimeError，由调用方转成界面提示."""
@@ -341,7 +347,7 @@ def stream_chat(user_input: str, history: Optional[list], system_prompt: str,
         if chat_mode:
             prompt, out_tokens = _build_chat_prompt(
                 tokenizer, list(history or []), text, system_prompt,
-                max_seq_len, max_new_tokens)
+                max_seq_len, max_new_tokens, enable_thinking)
         else:
             prompt, out_tokens = _build_prompt(
                 tokenizer, list(history or []), text, system_prompt,

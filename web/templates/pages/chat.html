@@ -36,6 +36,10 @@
           <label for="chat-system">{{ t('i.system') }}</label>
           <textarea id="chat-system" class="textarea textarea-bordered w-full" rows="4">{{ t('i.system_default') }}</textarea>
         </div>
+        <label class="check-row" title="{{ t('i.thinking_hint') }}">
+          <input id="chat-thinking" type="checkbox" class="checkbox checkbox-primary" checked>
+          <span>{{ t('i.thinking') }}</span>
+        </label>
         <details>
           <summary class="cursor-pointer text-sm font-semibold">{{ t('i.gen') }}</summary>
           <div class="stack mt-2">
