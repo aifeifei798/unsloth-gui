@@ -272,6 +272,11 @@ def _write_manifest(output_dir: Path, payload: dict) -> None:
         pass
 
 
+def _result(ok: bool, code: str) -> dict:
+    """生成器的返回值：结构化结果，别让上层靠文案前缀猜成功失败。"""
+    return {"ok": bool(ok), "code": code}
+
+
 def run_training(req: TrainRequest, progress=None,
                  on_log=None, cancel_event=None) -> Generator[str, None, None]:
     """生成器：yield 状态文本；progress(frac, desc=) 推进度；on_log(dict) 推指标."""
@@ -279,14 +284,14 @@ def run_training(req: TrainRequest, progress=None,
     exp = _safe_exp_name(req.experiment_name)
     if not exp:
         yield t("tr.no_exp_name")
-        return
+        return _result(False, "no_experiment_name")
     if not req.selected_dataset_names:
         yield t("tr.no_datasets")
-        return
+        return _result(False, "no_datasets")
 
     if not _lock.acquire(blocking=False):
         yield t("tr.running", exp=_state.get("experiment"))
-        return
+        return _result(False, "already_running")
     _state.update(running=True, experiment=exp)
     _cancel_event.clear()
     _external_cancel = cancel_event
@@ -298,6 +303,9 @@ def run_training(req: TrainRequest, progress=None,
     def _cancelled() -> bool:
         return (_cancel_event.is_set()
                 or (_external_cancel is not None and _external_cancel.is_set()))
+
+    # 提前占位：finally 里的 del 才能安全执行（见下方显存回收）
+    model = tokenizer = trainer = None
 
     try:
         from .config import (
@@ -321,7 +329,7 @@ def run_training(req: TrainRequest, progress=None,
 
         if _cancelled():
             yield t("tr.cancelled_before_start")
-            return
+            return _result(False, "cancelled")
 
         output_dir.parent.mkdir(parents=True, exist_ok=True)
         non_empty = output_dir.exists() and any(output_dir.iterdir())
@@ -329,11 +337,11 @@ def run_training(req: TrainRequest, progress=None,
         if non_empty:
             if not req.resume_training:
                 yield t("tr.dir_exists", dir=output_dir)
-                return
+                return _result(False, "dir_exists")
             resume_arg = _find_latest_checkpoint(output_dir)
             if resume_arg is None:
                 yield t("tr.resume_no_ckpt", dir=output_dir)
-                return
+                return _result(False, "resume_no_checkpoint")
 
         models = load_models_config()
         dataset_warnings: list[str] = []
@@ -343,7 +351,7 @@ def run_training(req: TrainRequest, progress=None,
         model_cfg = find_by_name(models, req.selected_model_name)
         if model_cfg is None:
             yield t("tr.no_model", name=req.selected_model_name)
-            return
+            return _result(False, "no_model")
 
         _call_progress(progress, 0.1, t("tr.loading_data"))
         yield t("tr.loading_data")
@@ -352,7 +360,7 @@ def run_training(req: TrainRequest, progress=None,
         for name in req.selected_dataset_names:
             if _cancelled():
                 yield t("tr.cancelled_before_start")
-                return
+                return _result(False, "cancelled")
             cfg = find_by_name(datasets_cfg, name)
             if cfg is None:
                 yield t("tr.warn_skip", name=name)
@@ -360,14 +368,14 @@ def run_training(req: TrainRequest, progress=None,
             if not is_trainable_dataset(cfg):
                 reason = trainable_reason(cfg) or t("tr.unprocessed", name=name)
                 yield t("tr.unprocessed_reason", name=name, reason=reason)
-                return
+                return _result(False, "dataset_not_trainable")
             # 先只加载原始数据：真正的格式化要等 tokenizer 到位（chat 模板模式）
             raw_ds.append(load_raw_dataset(cfg, req.truncate_dataset,
                                            max_samples=req.max_samples))
             selected_cfgs.append(cfg)
         if not raw_ds:
             yield t("tr.no_valid_ds")
-            return
+            return _result(False, "no_valid_dataset")
         yield t("tr.ready", n=sum(len(d) for d in raw_ds), k=len(raw_ds))
 
         # 重型依赖最后才导入：前面的数据校验完全不需要 torch
@@ -375,7 +383,7 @@ def run_training(req: TrainRequest, progress=None,
 
         if not torch.cuda.is_available():
             yield t("tr.no_cuda")
-            return
+            return _result(False, "no_cuda")
         try:
             torch._dynamo.config.recompile_limit = 100
         except Exception:
@@ -384,6 +392,7 @@ def run_training(req: TrainRequest, progress=None,
         configure_unsloth_env()  # 跳过 Unsloth 的联网体检（慢且没用）
         sanitize_proxy_env()  # socks:// 代理会让 huggingface_hub 直接崩
         import unsloth  # 必须早于 transformers，否则 Unsloth 的优化不生效
+        _ = unsloth  # 显式引用，避免被静态检查判成未使用
         block_unsloth_statistics()  # 再堵一次：Unsloth 内部是 import * 绑定的
         from unsloth import FastLanguageModel
 
@@ -393,7 +402,7 @@ def run_training(req: TrainRequest, progress=None,
             model_path = ensure_local_model(model_cfg)
         except Exception as e:
             yield t("tr.resolve_fail", err=e)
-            return
+            return _result(False, "model_resolve_failed")
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16}
         dtype = dtype_map.get(model_cfg.dtype) if model_cfg.dtype else None
         seq_len = int(req.max_seq_length or model_cfg.max_seq_length or 2048)
@@ -417,7 +426,7 @@ def run_training(req: TrainRequest, progress=None,
                 pass
         if _cancelled():
             yield t("tr.cancelled_before_start")
-            return
+            return _result(False, "cancelled")
 
         # 决定最终训练文本格式：模型自带 chat 模板（新，默认）还是老 prompt_template
         use_chat = bool(req.use_chat_template)
@@ -493,12 +502,17 @@ def run_training(req: TrainRequest, progress=None,
             ckpt = _find_latest_checkpoint(output_dir)
             yield t("tr.stopped",
                     ckpt=t("tr.stopped_ckpt", ckpt=ckpt) if ckpt else "")
-            return
+            return _result(True, "stopped")
         _call_progress(progress, 1.0, t("tr.done", dir=output_dir))
         yield t("tr.done", dir=output_dir)
+        return _result(True, "completed")
     except Exception:
         yield t("tr.failed", trace=traceback.format_exc(limit=8))
+        return _result(False, "failed")
     finally:
+        # 先把模型引用丢掉，gc/empty_cache 才真的能回收显存；
+        # 否则生成器帧还持有 model/trainer，回收等于空跑。
+        del model, tokenizer, trainer
         try:
             gc.collect()
             import torch

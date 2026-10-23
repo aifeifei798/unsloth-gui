@@ -367,6 +367,7 @@
   "web.inspect_expired": "Column info expired; inspect again",
   "web.bad_message": "Unrecognized message",
   "web.empty_message": "Message cannot be empty",
+  "web.bad_params": "Invalid generation params: max_new_tokens / temperature / top_p / top_k must be numbers",
   "web.lang_changed": "Language changed",
   "web.error": "Something went wrong",
   "web.train.progress": "Training progress",

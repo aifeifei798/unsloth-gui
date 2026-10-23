@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -93,6 +94,9 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
             elif p.suffix == ".csv":
                 ds = load_dataset("csv", data_files=str(p), split="train",
                                   streaming=streaming)
+            elif p.suffix == ".tsv":
+                ds = load_dataset("csv", data_files=str(p), split="train",
+                                  delimiter="\t", streaming=streaming)
             elif p.suffix in (".parquet",):
                 ds = load_dataset("parquet", data_files=str(p), split="train",
                                   streaming=streaming)
@@ -122,6 +126,9 @@ def load_raw_dataset(kind: str, hf_id: str = "", split: str = "train",
         elif p.suffix == ".csv":
             ds = load_dataset("csv", data_files=str(p), split="train",
                               streaming=streaming)
+        elif p.suffix == ".tsv":
+            ds = load_dataset("csv", data_files=str(p), split="train",
+                              delimiter="\t", streaming=streaming)
         elif p.suffix == ".parquet":
             ds = load_dataset("parquet", data_files=str(p), split="train",
                               streaming=streaming)
@@ -150,6 +157,29 @@ def _count_lines(path: Path, limit_bytes: int = 50 * 1024 * 1024) -> Optional[in
         return None
 
 
+# 预览大文件时最多读这么多字节；超过就不做「整文件 json.load」了
+_PEEK_BYTES = 1 * 1024 * 1024
+
+
+def _peek_big_json(path: Path) -> tuple[list, Optional[dict], Optional[int]]:
+    """只解析大 JSON 文件开头的第一个对象，避免 json.load 把整个文件读进内存。
+
+    支持 `[{...}, ...]` / `{"k": ...}` 两种常见写法；解析不出来就返回空。
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            head = f.read(_PEEK_BYTES)
+        start = head.find("{")
+        if start < 0:
+            return [], None, None
+        obj, _ = json.JSONDecoder().raw_decode(head[start:])
+        if isinstance(obj, dict):
+            return list(obj.keys()), obj, None
+    except Exception:
+        return [], None, None
+    return [], None, None
+
+
 def _peek_local_file(path: Path) -> tuple[list, Optional[dict], Optional[int]]:
     """只读本地文件的头部，不把整个文件拉进内存。"""
     suffix = path.suffix.lower()
@@ -168,6 +198,12 @@ def _peek_local_file(path: Path) -> tuple[list, Optional[dict], Optional[int]]:
                 return ["text"], {"text": str(obj)}, _count_lines(path)
         return [], None, 0
     if suffix == ".json":
+        try:
+            if path.stat().st_size > _PEEK_BYTES * 8:
+                # 大文件只解析开头一个对象；行数未知，交给 UI 显示“未知”
+                return _peek_big_json(path)
+        except OSError:
+            pass
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
         if isinstance(data, list):
@@ -254,12 +290,35 @@ def peek_source(kind: str, hf_id: str = "", split: str = "train",
     return cols, row, len(ds), False
 
 
+UPLOAD_KEEP_SECONDS = 7 * 24 * 3600
+
+
+def prune_uploads(keep_seconds: int = UPLOAD_KEEP_SECONDS) -> int:
+    """清掉 uploads/ 里过期的上传文件（进程内 upload_id 的 TTL 只有 24 小时）."""
+    removed = 0
+    if not UPLOAD_ROOT.is_dir():
+        return 0
+    cutoff = time.time() - keep_seconds
+    for f in UPLOAD_ROOT.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def persist_upload(src_path: str, original_name: str | None = None) -> str:
     """把上传文件持久化到 local_data/uploads/，文件名带时间戳 + 短 uuid，避免覆盖。"""
     src = Path(src_path)
     if not src.is_file():
         raise FileNotFoundError(t("dp.err.no_upload"))
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    try:
+        prune_uploads()
+    except Exception:
+        pass
     try:
         if src.resolve().is_relative_to(UPLOAD_ROOT.resolve()):
             return str(src)
@@ -295,7 +354,7 @@ def inspect_text(kind: str, hf_id: str = "", split: str = "train",
     cols, row, n_rows, streamed = peek_source(kind, hf_id, split, local_path, existing)
     if not cols:
         raise ValueError(t("dp.err.no_columns"))
-    count_line = (t("dp.inspect.unknown") if streamed
+    count_line = (t("dp.inspect.unknown") if streamed or n_rows is None
                   else t("dp.inspect.total", n=n_rows))
     lines = [
         count_line,

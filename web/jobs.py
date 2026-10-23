@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from src.i18n import t
+from src.i18n import get_lang, language, t
 
 from .errors import AppError
 
@@ -45,6 +45,7 @@ class Job:
     next_id: int = 1
     loop: Optional[asyncio.AbstractEventLoop] = None
     thread: Optional[threading.Thread] = None
+    lang: Optional[str] = None  # 启动任务时的界面语言，worker 线程里还原
 
     def emit(self, event: str, data: dict) -> None:
         """只允许在事件循环线程调用。"""
@@ -55,7 +56,13 @@ class Job:
             try:
                 q.put_nowait(ev)
             except asyncio.QueueFull:
-                pass
+                # 慢客户端积压：丢最旧的一条再塞新的，
+                # 保证 done / error / end 这类终止事件一定送得到。
+                try:
+                    q.get_nowait()
+                    q.put_nowait(ev)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    pass
 
     def emit_threadsafe(self, event: str, data: dict) -> None:
         loop = self.loop
@@ -132,38 +139,15 @@ class JobManager:
         self.cleanup()
         job = Job(kind=kind)
         job.loop = self.loop or asyncio.get_running_loop()
+        # ContextVar 不会跟着 threading.Thread 走，这里把发起请求时的界面语言
+        # 存进 Job，worker 线程里再套回去，否则任务日志永远是中文默认语言。
+        job.lang = get_lang()
         self.jobs[job.id] = job
         self.by_kind[kind] = job
 
         def run() -> None:
-            job.state = "running"
-            job.started_at = time.time()
-            job.emit_threadsafe("state", {"state": "running", "kind": kind,
-                                          "id": job.id})
-            try:
-                result = worker(job)
-                job.result = result
-                if job.cancel_event.is_set():
-                    job.state = "cancelled"
-                    job.emit_threadsafe("cancelled", {"message": t("web.job_cancelled")})
-                else:
-                    job.state = "done"
-                    job.emit_threadsafe("done", {"result": result})
-            except InterruptedError as e:
-                job.state = "cancelled"
-                job.emit_threadsafe("cancelled", {"message": str(e) or t("web.job_cancelled")})
-            except Exception as e:
-                job.state = "error"
-                job.error = str(e)
-                job.emit_threadsafe("error", {
-                    "message": str(e),
-                    "trace": traceback.format_exc(limit=12),
-                })
-            finally:
-                job.finished_at = time.time()
-                job.emit_threadsafe("state", {"state": job.state, "kind": kind,
-                                              "id": job.id})
-                job.emit_threadsafe("end", {})
+            with language(job.lang):
+                _run_job(job, kind, worker)
 
         job.thread = threading.Thread(target=run, name=f"job-{kind}-{job.id}",
                                       daemon=True)
@@ -177,6 +161,36 @@ class JobManager:
         job.cancel_event.set()
         job.emit_threadsafe("log", {"text": t("web.job_stopping"), "level": "warn"})
         return True
+
+
+def _run_job(job: Job, kind: str, worker: Callable[[Job], Any]) -> None:
+    """worker 线程正文：跑任务并把状态/结果/异常翻译成事件。"""
+    job.state = "running"
+    job.started_at = time.time()
+    job.emit_threadsafe("state", {"state": "running", "kind": kind, "id": job.id})
+    try:
+        result = worker(job)
+        job.result = result
+        if job.cancel_event.is_set():
+            job.state = "cancelled"
+            job.emit_threadsafe("cancelled", {"message": t("web.job_cancelled")})
+        else:
+            job.state = "done"
+            job.emit_threadsafe("done", {"result": result})
+    except InterruptedError as e:
+        job.state = "cancelled"
+        job.emit_threadsafe("cancelled", {"message": str(e) or t("web.job_cancelled")})
+    except Exception as e:
+        job.state = "error"
+        job.error = str(e)
+        job.emit_threadsafe("error", {
+            "message": str(e),
+            "trace": traceback.format_exc(limit=12),
+        })
+    finally:
+        job.finished_at = time.time()
+        job.emit_threadsafe("state", {"state": job.state, "kind": kind, "id": job.id})
+        job.emit_threadsafe("end", {})
 
 
 def _sse(ev: JobEvent) -> str:

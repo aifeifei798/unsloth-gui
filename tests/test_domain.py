@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from src.config import (
     SCHEMA_VERSION,
     DatasetConfig,
@@ -19,7 +21,13 @@ from src.dataset_utils import (
     supports_chat_roles,
 )
 from src.i18n import check_parity
-from src.inference_utils import _build_chat_prompt, _headers_from_template, _render_prompt
+from src.inference_utils import (
+    _build_chat_prompt,
+    _headers_from_template,
+    _lora_dir,
+    _render_prompt,
+    read_run_manifest,
+)
 from src.model_utils import (
     block_unsloth_statistics,
     configure_hf_transfer,
@@ -279,3 +287,61 @@ def test_unwrap_text_tokenizer_from_processor():
 def test_locale_parity():
     ok, problems = check_parity()
     assert ok, problems[:5]
+
+
+def test_lora_name_cannot_escape_outputs_dir():
+    # 传 ../ 之类的名字必须被拒，否则能读任意目录的 run_manifest.json
+    assert _lora_dir("../etc") is None
+    assert _lora_dir("/etc") is None
+    assert read_run_manifest("../etc") == {}
+    assert _lora_dir("exp_ok") is not None
+
+
+def test_run_training_returns_structured_result():
+    from src.train_utils import TrainRequest, run_training
+
+    req = TrainRequest(
+        experiment_name="", resume_training=False, truncate_dataset=False,
+        max_samples=10, training_mode="steps", num_epochs=1.0, max_steps=10,
+        save_steps=5, selected_model_name="m", selected_dataset_names=[],
+        lora_r=8, lora_alpha=16, batch_size=1, grad_accum=8, lr=2e-4,
+        max_seq_length=512,
+    )
+    gen = run_training(req)
+    with pytest.raises(StopIteration) as stop:
+        while True:
+            next(gen)
+    assert stop.value.value == {"ok": False, "code": "no_experiment_name"}
+
+
+def test_delete_accepts_list_config_and_direct_processed_dir():
+    from src import data_mgmt, paths
+
+    name = "list_style"
+    entry = paths.PROCESSED_ROOT / name
+    (entry / "hf_dataset").mkdir(parents=True, exist_ok=True)
+    (entry / "manifest.json").write_text(json.dumps({"name": name, "rows_kept": 2}),
+                                         encoding="utf-8")
+    cfg = {
+        "display_name": name,
+        # 直接指向 processed/<name>（没有 hf_dataset 后缀）的老配置
+        "dataset_id": f"./local_data/processed/{name}",
+        "is_local": True, "processed": True, "schema_version": SCHEMA_VERSION,
+        "prompt_template": "### Instruction:\n{instruction}\n\n### Response:\n{output}",
+        "input_columns": {"instruction": "instruction", "output": "output"},
+    }
+    cfg_file = paths.DATASETS_CONFIG_DIR / "list_style.json"
+    cfg_file.write_text(json.dumps([cfg]), encoding="utf-8")
+    try:
+        assert data_mgmt._find_config_file(name) == cfg_file
+        info = data_mgmt.delete_entry_strict(name)
+        assert info["removed_dirs"] == [name]
+        assert not entry.exists()
+        assert not cfg_file.exists()
+    finally:
+        if cfg_file.exists():
+            cfg_file.unlink()
+        if entry.exists():
+            import shutil
+
+            shutil.rmtree(entry, ignore_errors=True)

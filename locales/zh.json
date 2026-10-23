@@ -367,6 +367,7 @@
   "web.inspect_expired": "列信息已过期，请重新读取",
   "web.bad_message": "无法识别的消息",
   "web.empty_message": "消息不能为空",
+  "web.bad_params": "生成参数不合法：max_new_tokens / temperature / top_p / top_k 需要是数字",
   "web.lang_changed": "语言已切换",
   "web.error": "出错了",
   "web.train.progress": "训练进度",

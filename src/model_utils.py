@@ -115,7 +115,6 @@ def restore_socket_default_timeout() -> None:
     **全局**副作用，一改就是整个进程后续所有 socket 的默认超时都变成 3 秒，
     慢一点的下载会被误杀超时。这里还原掉。
     """
-    global _SOCKET_TIMEOUT, _SOCKET_TIMEOUT_CAPTURED
     if not _SOCKET_TIMEOUT_CAPTURED:
         return
     import socket

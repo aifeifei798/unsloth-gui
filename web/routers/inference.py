@@ -53,6 +53,16 @@ async def unload():
     return {"ok": True, "data": {"message": msg, **loaded_payload()}}
 
 
+def _consume_task_result(task: asyncio.Task) -> None:
+    """把后台对话任务的异常取出来，避免 event loop 报 never retrieved."""
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except Exception:
+        pass
+
+
 async def _run_chat(ws: WebSocket, message: str, history: list,
                     system_prompt: str, params: dict,
                     cancel: threading.Event) -> None:
@@ -137,16 +147,24 @@ async def chat_ws(ws: WebSocket):
             history = [h for h in history[-100:] if isinstance(h, dict)
                        and h.get("role") in ("user", "assistant")]
             system_prompt = str(data.get("system_prompt") or "")
-            params = {
-                "max_new_tokens": max(1, min(int(data.get("max_new_tokens") or 256), 4096)),
-                "temperature": max(0.0, min(float(data.get("temperature") or 0.7), 2.0)),
-                "top_p": max(0.01, min(float(data.get("top_p") or 0.95), 1.0)),
-                "top_k": max(0, min(int(data.get("top_k") or 40), 200)),
-            }
+            try:
+                params = {
+                    "max_new_tokens": max(1, min(int(data.get("max_new_tokens") or 256), 4096)),
+                    "temperature": max(0.0, min(float(data.get("temperature") or 0.7), 2.0)),
+                    "top_p": max(0.01, min(float(data.get("top_p") or 0.95), 1.0)),
+                    "top_k": max(0, min(int(data.get("top_k") or 40), 200)),
+                }
+            except (TypeError, ValueError):
+                # 参数写坏了只回一条错误，别把整个 WebSocket 关掉
+                await ws.send_json({"type": "error",
+                                    "message": t("web.bad_params")})
+                continue
             cancel = threading.Event()
             current["cancel"] = cancel
-            current["task"] = asyncio.create_task(
+            task = asyncio.create_task(
                 _run_chat(ws, message, history, system_prompt, params, cancel))
+            task.add_done_callback(_consume_task_result)
+            current["task"] = task
     except WebSocketDisconnect:
         pass
     except Exception as e:

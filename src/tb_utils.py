@@ -39,6 +39,18 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _looks_like_tensorboard(port: int) -> bool:
+    """端口被占时先确认上面真的是 TensorBoard，别把无关服务塞进 iframe."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=0.8) as r:
+            head = r.read(4096).decode("utf-8", "replace").lower()
+        return "tensorboard" in head
+    except Exception:
+        return False
+
+
 def _find_free_port(start: int = 6006, tries: int = 20) -> int:
     for p in range(start, start + tries):
         if not _port_in_use(p):
@@ -53,9 +65,11 @@ def launch_tensorboard(port: int = 6006) -> tuple[bool, str, int]:
         return True, t("tb.running", port=_PORT), _PORT
     LOGS_PARENT_DIR.mkdir(parents=True, exist_ok=True)
     if _port_in_use(port):
-        # 可能是外部已启动的 TB，直接复用
-        _PORT = port
-        return True, t("tb.reused", port=port), port
+        if _looks_like_tensorboard(port):
+            # 外部已启动的 TB，直接复用
+            _PORT = port
+            return True, t("tb.reused", port=port), port
+        # 被别的服务占着：顺延到下一个空闲端口，不要嵌错页面
     free = _find_free_port(port)
     try:
         _PROC = subprocess.Popen(

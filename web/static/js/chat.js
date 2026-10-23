@@ -105,9 +105,10 @@
     box.textContent = lines.join('\n');
     if (info.base_model_display && models.some((m) => m.display_name === info.base_model_display)) {
       const sel = qs('#chat-base');
-      if (!sel.value || sel.value === models[0]?.display_name) {
-        sel.value = info.base_model_display;
-      }
+      const known = Array.from(sel.options).some((o) => o.value === sel.value);
+      // 只在用户还没选（或原来的选中项已失效）时套用训练时用的基座，
+      // 不要覆盖用户手动选的第 0 个模型
+      if (!sel.value || !known) sel.value = info.base_model_display;
     }
   }
 
@@ -247,9 +248,16 @@
     }
     if (type === 'error') {
       if (currentBubble) {
-        currentBubble.classList.remove('streaming');
-        currentBubble.innerHTML = '<span class="text-error">' +
-          escapeHtml(msg.message || t('web.error')) + '</span>';
+        // 一个字都没生成（比如 inf.busy / 参数错误）就把空气泡收掉，
+        // 免得界面上留一个空的“助手”气泡
+        const wrap = currentBubble.parentElement;
+        if (!currentText.trim() && wrap) {
+          wrap.remove();
+        } else {
+          currentBubble.classList.remove('streaming');
+          currentBubble.innerHTML = '<span class="text-error">' +
+            escapeHtml(msg.message || t('web.error')) + '</span>';
+        }
       }
       toast(msg.message || t('web.error'), 'error');
       setStreaming(false);

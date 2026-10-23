@@ -95,12 +95,25 @@ async def start(body: TrainIn):
             job.emit_threadsafe("metrics", logs)
 
         last = ""
-        for msg in run_training(req, progress=progress, on_log=on_log,
-                                cancel_event=job.cancel_event):
+        # run_training 的返回值是结构化结果（ok / code），不再靠文案前缀猜
+        outcome: dict = {"ok": False, "code": "unknown"}
+        gen = run_training(req, progress=progress, on_log=on_log,
+                           cancel_event=job.cancel_event)
+        while True:
+            try:
+                msg = next(gen)
+            except StopIteration as stop:
+                if isinstance(stop.value, dict):
+                    outcome = stop.value
+                break
             last = msg
             job.emit_threadsafe("log", {"text": msg})
-        ok = not (last.startswith("❌") or last.startswith("错误"))
-        return {"last": last, "ok": ok, "experiment": req.experiment_name}
+        return {
+            "last": last,
+            "ok": bool(outcome.get("ok")),
+            "code": str(outcome.get("code") or "unknown"),
+            "experiment": req.experiment_name,
+        }
 
     job = job_manager.start("train", worker, exclusive=True)
     return {"ok": True, "data": {
@@ -124,6 +137,10 @@ async def events(request: Request, job_id: str = Query(""), last_id: int = Query
     job = job_manager.get(job_id) if job_id else _last_train_job()
     if job is None:
         raise not_found(t("web.job_not_found"))
+    # 浏览器 EventSource 重连时带的是 Last-Event-ID 头，不是 query 参数
+    header = request.headers.get("last-event-id")
+    if header and header.isdigit():
+        last_id = max(last_id, int(header))
     return await sse_response(job, request, last_id)
 
 

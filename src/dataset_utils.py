@@ -73,6 +73,9 @@ def load_raw_dataset(
             dataset = load_dataset("json", data_files=ds_path, split="train")
         elif p.suffix == ".csv":
             dataset = load_dataset("csv", data_files=ds_path, split="train")
+        elif p.suffix == ".tsv":
+            dataset = load_dataset("csv", data_files=ds_path, split="train",
+                                   delimiter="\t")
         elif p.suffix == ".txt":
             dataset = load_dataset("text", data_files=ds_path, split="train")
         else:

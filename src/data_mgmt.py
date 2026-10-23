@@ -25,6 +25,10 @@ from .paths import is_under
 from .storage import atomic_write_json
 
 
+# 超过这个大小就不在详情页同步数行数（沿用 dataprep 预览的上限思路）
+_COUNT_MAX_BYTES = 200 * 1024 * 1024
+
+
 def _human_size(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
@@ -44,28 +48,33 @@ def _find_config_file(display_name: str) -> Optional[Path]:
     for fp in sorted(DATASETS_CONFIG_DIR.glob("*.json")):
         try:
             with open(fp, "r", encoding="utf-8") as f:
-                if json.load(f).get("display_name") == display_name:
-                    return fp
+                data = json.load(f)
         except Exception:
             continue
+        # 单文件里既可能是对象，也可能是数组（load_datasets_config 两种都认）
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if isinstance(item, dict) and item.get("display_name") == display_name:
+                return fp
     return None
 
 
 def _artifact_dir(cfg: DatasetConfig) -> Optional[Path]:
-    """本工具生成的产物目录（local_data/processed/<name>/hf_dataset）.
+    """本工具生成的数据目录（local_data/processed/<name>）。
 
-    不是产物、或直接指向 processed 根目录时返回 None，避免误删全部数据。
+    返回「够删一层」的目录本身，而不是 dataset_id 指向的更深层路径；
+    dataset_id 直接指向 processed/<name>（没有 hf_dataset 子目录）时也能
+    正常识别，避免删配置却留下孤儿目录。绝不会返回 processed 根目录。
     """
     try:
         p = Path(cfg.resolved_dataset_id()).resolve()
-    except Exception:
+        rel = p.relative_to(PROCESSED_ROOT.resolve())
+    except (OSError, ValueError):
         return None
-    if not is_under(p, PROCESSED_ROOT) or p == PROCESSED_ROOT:
+    if not rel.parts:  # 就是 processed 根，拒绝
         return None
-    # 必须至少是 processed/<name>/xxx，且父目录不是 processed 根
-    if p.parent == PROCESSED_ROOT:
-        return None
-    return p if p.exists() else None
+    root = PROCESSED_ROOT / rel.parts[0]
+    return root if root.is_dir() else None
 
 
 def entry_info(cfg: DatasetConfig) -> dict:
@@ -80,7 +89,7 @@ def entry_info(cfg: DatasetConfig) -> dict:
     }
     art = _artifact_dir(cfg)
     if art is not None:
-        man_path = art.parent / "manifest.json"
+        man_path = art / "manifest.json"
         try:
             with open(man_path, "r", encoding="utf-8") as f:
                 man = json.load(f)
@@ -91,7 +100,7 @@ def entry_info(cfg: DatasetConfig) -> dict:
             info["created"] = "—"
         info["source"] = t("dm.src.unified")
         try:
-            info["size"] = _human_size(_dir_size(art.parent))
+            info["size"] = _human_size(_dir_size(art))
         except Exception:
             info["size"] = "—"
         return info
@@ -103,9 +112,13 @@ def entry_info(cfg: DatasetConfig) -> dict:
         p = None
     if p is not None and p.is_file() and p.suffix in (".jsonl", ".json"):
         try:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                n = sum(1 for line in f if line.strip())
-            info["rows"] = str(n)
+            # 大文件不数行：这是同步接口，几千 MB 扫一遍会把设置页拖住
+            if p.stat().st_size > _COUNT_MAX_BYTES:
+                info["rows"] = t("dm.rows.remote")
+            else:
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    n = sum(1 for line in f if line.strip())
+                info["rows"] = str(n)
         except Exception:
             info["rows"] = "?"
         info["source"] = t("dm.src.local_file")
@@ -162,7 +175,7 @@ def detail_text(name: str) -> str:
     art = _artifact_dir(cfg)
     if art is not None:
         try:
-            with open(art.parent / "manifest.json", "r", encoding="utf-8") as f:
+            with open(art / "manifest.json", "r", encoding="utf-8") as f:
                 man = json.load(f)
             mp = man.get("mapping", {})
             lines.append(t("dm.detail.mapping",
@@ -211,10 +224,9 @@ def delete_entry_strict(name: str) -> dict:
     cfg = find_by_name(cfgs, name)
     removed_dirs: list[str] = []
     if cfg is not None:
-        art = _artifact_dir(cfg)
-        if art is not None:
-            target = art.parent
-            if target == PROCESSED_ROOT:
+        target = _artifact_dir(cfg)
+        if target is not None:
+            if target == PROCESSED_ROOT or not is_under(target, PROCESSED_ROOT):
                 raise ValueError(t("dm.err.refuse_root"))
             try:
                 shutil.rmtree(target)
@@ -265,7 +277,7 @@ def rename_entry(old: str, new: str) -> str:
 
     moved = False
     if art is not None and target is not None:
-        art.parent.rename(target)
+        art.rename(target)
         moved = True
         try:
             man_path = target / "manifest.json"
@@ -283,7 +295,7 @@ def rename_entry(old: str, new: str) -> str:
     except Exception:
         if moved and target is not None:
             try:
-                target.rename(art.parent)
+                target.rename(PROCESSED_ROOT / art.name)
             except OSError:
                 pass
         raise

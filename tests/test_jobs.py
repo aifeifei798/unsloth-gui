@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import time
 
-from web.jobs import JobManager, sse_response
+from src.i18n import language, t
+
+from web.jobs import Job, JobManager, sse_response
 
 
 class FakeRequest:
@@ -62,6 +64,34 @@ def test_cancel_sets_event_and_state():
         assert job.state == "cancelled"
 
     asyncio.run(main())
+
+
+def test_job_worker_inherits_request_language():
+    """worker 是裸线程，ContextVar 不继承；必须靠 Job.lang 还原，否则日志恒中文."""
+
+    async def main():
+        manager = JobManager()
+        manager.bind_loop()
+        with language("en"):
+            job = manager.start("lang", lambda j: t("web.job_busy"))
+        for _ in range(200):
+            if job.is_finished():
+                break
+            await asyncio.sleep(0.01)
+        assert job.state == "done"
+        assert job.result.startswith("Another job")
+
+    asyncio.run(main())
+
+
+def test_full_subscriber_queue_keeps_latest_event():
+    """慢客户端积压时丢最旧的，但 end/done 这类终止事件不能被丢掉."""
+    job = Job(kind="x")
+    q: asyncio.Queue = asyncio.Queue(maxsize=1)
+    job.subscribers.add(q)
+    job.emit("log", {"i": 1})
+    job.emit("end", {})
+    assert q.get_nowait().event == "end"
 
 
 def test_busy_only_per_kind():
